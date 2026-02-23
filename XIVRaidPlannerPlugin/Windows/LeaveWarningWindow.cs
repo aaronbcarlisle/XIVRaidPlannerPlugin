@@ -22,6 +22,7 @@ public class LeaveWarningWindow : Window, IDisposable
     private Vector2 _windowBottomCenter;
     private float _addonTopCenter;
     private bool _hasAddonAnchor;
+    private bool _stylesPushed;
 
     public LeaveWarningWindow(LeaveWarningService leaveWarning, IGameGui gameGui)
         : base("##LeaveWarning",
@@ -47,48 +48,52 @@ public class LeaveWarningWindow : Window, IDisposable
     public override void PreDraw()
     {
         _hasAddonAnchor = false;
+        _stylesPushed = false;
 
-        // Try to anchor above the game's SelectYesno ("Abandon duty?") dialog
+        // If warning was already dismissed, close immediately to prevent flash
+        if (!_leaveWarning.ShouldShowWarning)
+        {
+            IsOpen = false;
+            return;
+        }
+
+        // Only show when the game dialog is visible — close instantly when it's gone
         var addon = _gameGui.GetAddonByName("SelectYesno", 1);
-        if (!addon.IsNull && addon.IsVisible)
+        if (addon.IsNull || !addon.IsVisible)
         {
-            var addonPos = addon.Position;
-            var addonWidth = addon.ScaledWidth;
-
-            // Center horizontally over the dialog, place above with gap for arrow
-            var x = addonPos.X + addonWidth * 0.5f;
-            var y = addonPos.Y - 14; // gap for the arrow
-
-            ImGui.SetNextWindowPos(new Vector2(x, y), ImGuiCond.Always, new Vector2(0.5f, 1f));
-
-            _addonTopCenter = addonPos.Y;
-            _hasAddonAnchor = true;
-        }
-        else
-        {
-            // Fallback: center on screen
-            var viewport = ImGui.GetMainViewport();
-            ImGui.SetNextWindowPos(
-                new Vector2(viewport.WorkPos.X + viewport.WorkSize.X * 0.5f,
-                            viewport.WorkPos.Y + viewport.WorkSize.Y * 0.4f),
-                ImGuiCond.Always,
-                new Vector2(0.5f, 0.5f));
+            _leaveWarning.Dismiss();
+            IsOpen = false;
+            return;
         }
 
-        // Semi-transparent dark background
+        // Anchor above the game dialog
+        var addonPos = addon.Position;
+        var addonWidth = addon.ScaledWidth;
+        var x = addonPos.X + addonWidth * 0.5f;
+        var y = addonPos.Y - 14;
+
+        ImGui.SetNextWindowPos(new Vector2(x, y), ImGuiCond.Always, new Vector2(0.5f, 1f));
+        _addonTopCenter = addonPos.Y;
+        _hasAddonAnchor = true;
+
+        // Semi-transparent dark background with red accent border
         ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.08f, 0.08f, 0.12f, 0.95f));
         ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.9f, 0.25f, 0.25f, 0.8f));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 8f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16, 12));
+        _stylesPushed = true;
 
         ImGui.SetNextWindowFocus();
     }
 
     public override void PostDraw()
     {
-        ImGui.PopStyleVar(3);
-        ImGui.PopStyleColor(2);
+        if (_stylesPushed)
+        {
+            ImGui.PopStyleVar(3);
+            ImGui.PopStyleColor(2);
+        }
 
         // Draw the arrow connector from our window down to the game dialog
         if (_hasAddonAnchor)
@@ -117,7 +122,7 @@ public class LeaveWarningWindow : Window, IDisposable
             return;
         }
 
-        // Warning icon + header
+        // Warning header
         ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), "!! Unclaimed Priority Loot !!");
         ImGui.Spacing();
 
@@ -125,9 +130,9 @@ public class LeaveWarningWindow : Window, IDisposable
         {
             var rankColor = item.Rank switch
             {
-                1 => new Vector4(1, 0.843f, 0, 1),   // Gold
-                2 => new Vector4(0.753f, 0.753f, 0.753f, 1), // Silver
-                3 => new Vector4(0.804f, 0.498f, 0.196f, 1), // Bronze
+                1 => new Vector4(1, 0.843f, 0, 1),
+                2 => new Vector4(0.753f, 0.753f, 0.753f, 1),
+                3 => new Vector4(0.804f, 0.498f, 0.196f, 1),
                 _ => new Vector4(1, 1, 1, 1),
             };
 
@@ -138,7 +143,7 @@ public class LeaveWarningWindow : Window, IDisposable
 
         ImGui.Spacing();
 
-        // Capture the bottom-center of the window content for the arrow
+        // Capture the bottom-center of the window for the arrow
         var windowPos = ImGui.GetWindowPos();
         var windowSize = ImGui.GetWindowSize();
         _windowBottomCenter = new Vector2(windowPos.X + windowSize.X * 0.5f, windowPos.Y + windowSize.Y);

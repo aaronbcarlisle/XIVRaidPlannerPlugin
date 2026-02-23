@@ -96,6 +96,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Hook into the "Abandon duty?" confirmation dialog for leave warnings
         AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
+        AddonLifecycle.RegisterListener(AddonEvent.PreFinalize, "SelectYesno", OnSelectYesnoClose);
 
         // Check if already in a savage instance (e.g., plugin loaded mid-instance)
         _territoryService.CheckCurrentTerritory();
@@ -111,6 +112,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi -= ToggleOverlay;
 
         AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
+        AddonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "SelectYesno", OnSelectYesnoClose);
 
         _territoryService.OnSavageEntered -= OnSavageEntered;
         _territoryService.OnSavageExited -= OnSavageExited;
@@ -234,6 +236,13 @@ public sealed class Plugin : IDalamudPlugin
         {
             Log.Information("Leave check passed — no unclaimed priority loot");
         }
+    }
+
+    private void OnSelectYesnoClose(AddonEvent type, AddonArgs args)
+    {
+        // Dialog closed (Yes, No, or Escape) — dismiss our overlay
+        _leaveWarning.Dismiss();
+        _leaveWarningWindow.IsOpen = false;
     }
 
     // ==================== Loot Detection ====================
