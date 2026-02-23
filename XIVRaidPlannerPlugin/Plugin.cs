@@ -358,6 +358,7 @@ public sealed class Plugin : IDalamudPlugin
                 RecipientPlayerId = playerId,
                 Method = "drop",
                 Notes = "Logged via Dalamud plugin",
+                MarkAugmented = true,
             });
         }
 
@@ -371,6 +372,7 @@ public sealed class Plugin : IDalamudPlugin
                 RecipientPlayerId = playerId,
                 Method = "drop",
                 Notes = "Logged via Dalamud plugin",
+                MarkAcquired = true,
             });
         }
 

@@ -73,6 +73,7 @@ public class LootLogCreateRequest
     [JsonPropertyName("notes")] public string? Notes { get; set; }
     [JsonPropertyName("weaponJob")] public string? WeaponJob { get; set; }
     [JsonPropertyName("isExtra")] public bool IsExtra { get; set; }
+    [JsonPropertyName("markAcquired")] public bool MarkAcquired { get; set; }
 }
 
 public class MaterialLogCreateRequest
@@ -82,7 +83,9 @@ public class MaterialLogCreateRequest
     [JsonPropertyName("materialType")] public string MaterialType { get; set; } = string.Empty;
     [JsonPropertyName("recipientPlayerId")] public string RecipientPlayerId { get; set; } = string.Empty;
     [JsonPropertyName("method")] public string Method { get; set; } = "drop";
+    [JsonPropertyName("slotAugmented")] public string? SlotAugmented { get; set; }
     [JsonPropertyName("notes")] public string? Notes { get; set; }
+    [JsonPropertyName("markAugmented")] public bool MarkAugmented { get; set; }
 }
 
 public class MarkFloorClearedRequest
