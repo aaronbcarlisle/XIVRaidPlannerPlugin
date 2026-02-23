@@ -1,4 +1,7 @@
+using System.Linq;
 using System.Threading.Tasks;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Command;
 using Dalamud.IoC;
 using Dalamud.Plugin;
@@ -23,6 +26,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
     [PluginService] internal static IPartyList PartyList { get; private set; } = null!;
+    [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
+    [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private const string CommandName = "/xrp";
@@ -59,7 +64,7 @@ public sealed class Plugin : IDalamudPlugin
         _leaveWarning = new LeaveWarningService(Configuration, Log);
 
         // Initialize windows
-        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching);
+        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState);
         _overlayWindow = new PriorityOverlayWindow();
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning);
@@ -88,6 +93,12 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleOverlay;
 
+        // Hook into the "Abandon duty?" confirmation dialog for leave warnings
+        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
+
+        // Check if already in a savage instance (e.g., plugin loaded mid-instance)
+        _territoryService.CheckCurrentTerritory();
+
         Log.Information("XIV Raid Planner plugin loaded");
     }
 
@@ -97,6 +108,8 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleOverlay;
+
+        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
 
         _territoryService.OnSavageEntered -= OnSavageEntered;
         _territoryService.OnSavageExited -= OnSavageExited;
@@ -164,7 +177,8 @@ public sealed class Plugin : IDalamudPlugin
                 _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName);
                 _overlayWindow.IsOpen = true;
 
-                // Match party members to planner players
+                // Share player list with config window and run matching
+                _configWindow.SetStaticPlayers(_cachedPriority.Players);
                 _partyMatching.MatchParty(_cachedPriority.Players);
             }
         });
@@ -175,6 +189,35 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.ClearData();
         _overlayWindow.IsOpen = false;
         _leaveWarningWindow.IsOpen = false;
+    }
+
+    // ==================== Leave Warning ====================
+
+    private void OnSelectYesnoSetup(AddonEvent type, AddonArgs args)
+    {
+        // Only check when we're in a savage instance with priority data
+        if (_territoryService.CurrentFloor == null || _cachedPriority == null || !Configuration.EnableLeaveWarning)
+            return;
+
+        // Find the current player's planner ID from their character name
+        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+        if (string.IsNullOrEmpty(charName))
+            return;
+
+        var currentPlayerId = _partyMatching.GetPlayerIdForName(charName);
+
+        // Get the floor priority data
+        var floorKey = $"floor{_territoryService.CurrentFloor.Value}";
+        if (!_cachedPriority.Priority.TryGetValue(floorKey, out var floorPriority))
+            return;
+
+        _leaveWarning.CheckLeaveWarning(currentPlayerId, _lootDetection.DistributedLoot, floorPriority);
+
+        if (_leaveWarning.ShouldShowWarning)
+        {
+            _leaveWarningWindow.IsOpen = true;
+            Log.Information("Leave warning shown — player has unclaimed priority loot");
+        }
     }
 
     // ==================== Loot Detection ====================
@@ -225,25 +268,43 @@ public sealed class Plugin : IDalamudPlugin
     private void OnManualLog(string playerId, string slot, string playerName)
     {
         var floorName = _territoryService.CurrentFloorName ?? "Unknown";
+        Log.Information($"Manual log requested: {slot} -> {playerName} (floor={floorName}, player={playerId})");
+        ChatGui.Print($"[XRP] Logging {slot} -> {playerName}...");
+
         Task.Run(async () =>
         {
-            var weekData = await _apiClient.GetCurrentWeekAsync();
-            var week = weekData?.CurrentWeek ?? 1;
+            try
+            {
+                var weekData = await _apiClient.GetCurrentWeekAsync();
+                var week = weekData?.CurrentWeek ?? 1;
 
-            // Determine if this is a gear slot or material
-            string? gearSlot = null;
-            string? materialType = null;
+                // Determine if this is a gear slot or material
+                string? gearSlot = null;
+                string? materialType = null;
 
-            if (slot is "twine" or "glaze" or "solvent" or "universal_tomestone")
-                materialType = slot;
-            else
-                gearSlot = slot;
+                if (slot is "twine" or "glaze" or "solvent" or "universal_tomestone")
+                    materialType = slot;
+                else
+                    gearSlot = slot;
 
-            await LogLootAsync(playerId, gearSlot, materialType, floorName, week);
-            Log.Information($"Manual log: {slot} -> {playerName}");
-
-            // Refresh priority after logging
-            await RefreshPriority();
+                var success = await LogLootAsync(playerId, gearSlot, materialType, floorName, week);
+                if (success)
+                {
+                    Log.Information($"Manual log success: {slot} -> {playerName}");
+                    ChatGui.Print($"[XRP] Logged {slot} -> {playerName}");
+                    await RefreshPriority();
+                }
+                else
+                {
+                    Log.Error($"Manual log failed: {slot} -> {playerName}");
+                    ChatGui.PrintError($"[XRP] Failed to log {slot} -> {playerName}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log.Error($"Manual log exception: {ex}");
+                ChatGui.PrintError($"[XRP] Error: {ex.Message}");
+            }
         });
     }
 
@@ -258,11 +319,11 @@ public sealed class Plugin : IDalamudPlugin
         });
     }
 
-    private async Task LogLootAsync(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber)
+    private async Task<bool> LogLootAsync(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber)
     {
         if (materialType != null)
         {
-            await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
+            return await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
             {
                 WeekNumber = weekNumber,
                 Floor = floorName,
@@ -272,9 +333,10 @@ public sealed class Plugin : IDalamudPlugin
                 Notes = "Logged via Dalamud plugin",
             });
         }
-        else if (gearSlot != null)
+
+        if (gearSlot != null)
         {
-            await _apiClient.CreateLootLogEntryAsync(new LootLogCreateRequest
+            return await _apiClient.CreateLootLogEntryAsync(new LootLogCreateRequest
             {
                 WeekNumber = weekNumber,
                 Floor = floorName,
@@ -284,6 +346,8 @@ public sealed class Plugin : IDalamudPlugin
                 Notes = "Logged via Dalamud plugin",
             });
         }
+
+        return false;
     }
 
     private void OnMarkFloorCleared()

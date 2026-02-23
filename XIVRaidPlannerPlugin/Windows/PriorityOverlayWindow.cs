@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Interface.Windowing;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using XIVRaidPlannerPlugin.Api;
 
 namespace XIVRaidPlannerPlugin.Windows;
@@ -35,14 +35,12 @@ public class PriorityOverlayWindow : Window, IDisposable
 
     public PriorityOverlayWindow()
         : base("XIV Raid Planner",
-            ImGuiWindowFlags.NoCollapse |
-            ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.AlwaysAutoResize)
+            ImGuiWindowFlags.NoCollapse)
     {
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(300, 150),
-            MaximumSize = new Vector2(800, 600),
+            MinimumSize = new Vector2(400, 200),
+            MaximumSize = new Vector2(1200, 800),
         };
 
         // Semi-transparent background
@@ -79,13 +77,17 @@ public class PriorityOverlayWindow : Window, IDisposable
 
         // Header
         ImGui.TextColored(new Vector4(0.298f, 0.722f, 0.659f, 1f), $"XIV Raid Planner - {_floorName}");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Week {_priorityData.CurrentWeek}");
         ImGui.Separator();
 
         // Render priority columns for each drop type
         var dropTypes = new List<string>(floorPriority.Keys);
-        var columnCount = Math.Min(dropTypes.Count, 4);
+        var columnCount = dropTypes.Count;
 
-        if (columnCount > 0 && ImGui.BeginTable("priority_table", columnCount, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.SizingStretchSame))
+        if (columnCount > 0 && ImGui.BeginTable("priority_table", columnCount,
+            ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.SizingStretchSame |
+            ImGuiTableFlags.ScrollY | ImGuiTableFlags.BordersOuterH))
         {
             // Column headers
             foreach (var drop in dropTypes)
@@ -94,8 +96,16 @@ public class PriorityOverlayWindow : Window, IDisposable
             }
             ImGui.TableHeadersRow();
 
-            // Data rows - show top 3 per column
-            for (var row = 0; row < 3; row++)
+            // Find max row count across all columns
+            var maxRows = 0;
+            foreach (var drop in dropTypes)
+            {
+                if (floorPriority[drop].Count > maxRows)
+                    maxRows = floorPriority[drop].Count;
+            }
+
+            // Data rows — all players, each with a log button
+            for (var row = 0; row < maxRows; row++)
             {
                 ImGui.TableNextRow();
                 for (var col = 0; col < dropTypes.Count; col++)
@@ -107,28 +117,21 @@ public class PriorityOverlayWindow : Window, IDisposable
                     {
                         var entry = entries[row];
                         var color = GetRoleColor(entry.Job);
+
+                        // Rank + player name with role color
                         ImGui.TextColored(color, $"{row + 1}. {entry.PlayerName} ({entry.Job})");
                         ImGui.SameLine();
                         ImGui.TextDisabled($"[{entry.Score}]");
-                    }
-                }
-            }
 
-            // Log buttons row
-            ImGui.TableNextRow();
-            for (var col = 0; col < dropTypes.Count; col++)
-            {
-                ImGui.TableSetColumnIndex(col);
-                var entries = floorPriority[dropTypes[col]];
-                if (entries.Count > 0)
-                {
-                    var top = entries[0];
-                    ImGui.PushID($"log_{dropTypes[col]}");
-                    if (ImGui.SmallButton($"Log -> {top.PlayerName}"))
-                    {
-                        OnManualLog?.Invoke(top.PlayerId, dropTypes[col], top.PlayerName);
+                        // Log button on the same line
+                        ImGui.SameLine();
+                        ImGui.PushID($"log_{dropTypes[col]}_{row}");
+                        if (ImGui.SmallButton("Log"))
+                        {
+                            OnManualLog?.Invoke(entry.PlayerId, dropTypes[col], entry.PlayerName);
+                        }
+                        ImGui.PopID();
                     }
-                    ImGui.PopID();
                 }
             }
 
@@ -142,9 +145,6 @@ public class PriorityOverlayWindow : Window, IDisposable
         {
             OnMarkFloorCleared?.Invoke();
         }
-
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Week {_priorityData.CurrentWeek}");
     }
 
     private static Vector4 GetRoleColor(string job)

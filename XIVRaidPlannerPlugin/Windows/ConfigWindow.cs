@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
 using Dalamud.Interface.Windowing;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
 using XIVRaidPlannerPlugin.Services;
 
@@ -18,6 +20,8 @@ public class ConfigWindow : Window, IDisposable
     private readonly Configuration _config;
     private readonly RaidPlannerClient _apiClient;
     private readonly PartyMatchingService _partyMatching;
+    private readonly IPartyList _partyList;
+    private readonly IPlayerState _playerState;
 
     // UI state
     private string _apiKeyInput = "";
@@ -29,13 +33,24 @@ public class ConfigWindow : Window, IDisposable
     private int _selectedGroupIndex = -1;
     private int _selectedAutoLogMode;
 
-    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching)
+    // Static tab state
+    private List<TierInfo>? _tiers;
+    private int _selectedTierIndex = -1;
+    private bool _isFetchingTiers;
+
+    // Players tab state
+    private List<PlayerInfo>? _staticPlayers;
+    private bool _isFetchingRoster;
+
+    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState)
         : base("XIV Raid Planner - Settings",
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize)
     {
         _config = config;
         _apiClient = apiClient;
         _partyMatching = partyMatching;
+        _partyList = partyList;
+        _playerState = playerState;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -47,6 +62,9 @@ public class ConfigWindow : Window, IDisposable
         _apiUrlInput = _config.ApiBaseUrl;
         _selectedAutoLogMode = (int)_config.AutoLogMode;
     }
+
+    /// <summary>Update the cached static player list (called when priority data is fetched).</summary>
+    public void SetStaticPlayers(List<PlayerInfo> players) => _staticPlayers = players;
 
     public override void Draw()
     {
@@ -161,70 +179,232 @@ public class ConfigWindow : Window, IDisposable
         for (var i = 0; i < _staticGroups.Count; i++)
             groupNames[i] = _staticGroups[i].Name;
 
-        if (ImGui.Combo("##group", ref _selectedGroupIndex, groupNames, groupNames.Length))
+        // Sync selected index with saved config
+        if (_selectedGroupIndex < 0 && !string.IsNullOrEmpty(_config.DefaultGroupId))
+        {
+            for (var i = 0; i < _staticGroups.Count; i++)
+            {
+                if (_staticGroups[i].Id == _config.DefaultGroupId)
+                {
+                    _selectedGroupIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (ImGui.Combo("##group", ref _selectedGroupIndex, groupNames))
         {
             if (_selectedGroupIndex >= 0 && _selectedGroupIndex < _staticGroups.Count)
             {
                 _config.DefaultGroupId = _staticGroups[_selectedGroupIndex].Id;
+                _config.DefaultTierId = string.Empty;
+                _tiers = null;
+                _selectedTierIndex = -1;
                 _config.Save();
             }
         }
 
-        // Tier selector placeholder
-        ImGui.Spacing();
-        ImGui.Text("Tier ID");
-        var tierInput = _config.DefaultTierId;
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##tierid", ref tierInput, 100))
+        // Auto-fetch tiers when group is selected
+        if (!string.IsNullOrEmpty(_config.DefaultGroupId) && _tiers == null && !_isFetchingTiers)
         {
-            _config.DefaultTierId = tierInput;
-            _config.Save();
+            _isFetchingTiers = true;
+            var groupId = _config.DefaultGroupId;
+            Task.Run(async () =>
+            {
+                _tiers = await _apiClient.GetTiersAsync(groupId);
+                _isFetchingTiers = false;
+            });
         }
-        ImGui.TextDisabled("e.g., aac-heavyweight");
+
+        // Tier selector
+        ImGui.Spacing();
+        ImGui.Text("Tier");
+
+        if (_isFetchingTiers)
+        {
+            ImGui.TextDisabled("Loading tiers...");
+        }
+        else if (_tiers == null || _tiers.Count == 0)
+        {
+            ImGui.TextDisabled("No tiers found. Select a group first.");
+        }
+        else
+        {
+            var tierNames = new string[_tiers.Count];
+            for (var i = 0; i < _tiers.Count; i++)
+            {
+                var active = _tiers[i].IsActive ? " (active)" : "";
+                tierNames[i] = $"{_tiers[i].TierId}{active}";
+            }
+
+            // Sync selected index with saved config
+            if (_selectedTierIndex < 0 && !string.IsNullOrEmpty(_config.DefaultTierId))
+            {
+                for (var i = 0; i < _tiers.Count; i++)
+                {
+                    if (_tiers[i].Id == _config.DefaultTierId)
+                    {
+                        _selectedTierIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            if (ImGui.Combo("##tier", ref _selectedTierIndex, tierNames))
+            {
+                if (_selectedTierIndex >= 0 && _selectedTierIndex < _tiers.Count)
+                {
+                    _config.DefaultTierId = _tiers[_selectedTierIndex].Id;
+                    _config.Save();
+                }
+            }
+        }
     }
 
     private void DrawPlayersTab()
     {
-        ImGui.Text("Party Member Matching");
+        ImGui.Text("Link party members to your static roster.");
         ImGui.Spacing();
 
-        if (_partyMatching.CurrentMatches.Count == 0 && _partyMatching.UnmatchedPartyMembers.Count == 0)
+        // Fetch roster button
+        if (_staticPlayers == null || _staticPlayers.Count == 0)
         {
-            ImGui.TextDisabled("Enter a savage instance to see party matching.");
-            return;
+            if (!_isFetchingRoster)
+            {
+                if (ImGui.Button("Load Static Roster"))
+                {
+                    _isFetchingRoster = true;
+                    Task.Run(async () =>
+                    {
+                        var priority = await _apiClient.GetPriorityAsync();
+                        if (priority != null)
+                            _staticPlayers = priority.Players;
+                        _isFetchingRoster = false;
+                    });
+                }
+                ImGui.SameLine();
+                ImGui.TextDisabled("Requires connection + static/tier configured.");
+            }
+            else
+            {
+                ImGui.TextDisabled("Loading...");
+            }
+
+            if (_staticPlayers == null || _staticPlayers.Count == 0)
+                return;
         }
 
-        // Matched players
-        if (_partyMatching.CurrentMatches.Count > 0)
+        // Build party member name list (include local player when solo)
+        var partyNames = new List<string>();
+        foreach (var member in _partyList)
         {
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), "Matched:");
-            foreach (var (name, playerId) in _partyMatching.CurrentMatches)
+            var name = member.Name.ToString().Trim();
+            if (!string.IsNullOrEmpty(name))
+                partyNames.Add(name);
+        }
+
+        if (partyNames.Count == 0 && _playerState.IsLoaded)
+        {
+            var localName = _playerState.CharacterName;
+            if (!string.IsNullOrEmpty(localName))
+                partyNames.Add(localName);
+        }
+
+        // Build combo options: ["(none)", "PlayerName (Job)", ...]
+        var comboLabels = new string[_staticPlayers.Count + 1];
+        comboLabels[0] = "(none)";
+        for (var i = 0; i < _staticPlayers.Count; i++)
+            comboLabels[i + 1] = $"{_staticPlayers[i].Name} ({_staticPlayers[i].Job})";
+
+        // Current party assignment section
+        if (partyNames.Count > 0)
+        {
+            ImGui.TextColored(new Vector4(0.298f, 0.722f, 0.659f, 1f), "Current Party");
+            ImGui.Separator();
+
+            foreach (var partyName in partyNames)
             {
-                ImGui.BulletText($"{name} -> {playerId[..8]}...");
+                ImGui.PushID(partyName);
+
+                // Find current assignment
+                _config.PlayerNameOverrides.TryGetValue(partyName, out var assignedId);
+                var selectedIndex = 0;
+                if (assignedId != null)
+                {
+                    for (var i = 0; i < _staticPlayers.Count; i++)
+                    {
+                        if (_staticPlayers[i].Id == assignedId)
+                        {
+                            selectedIndex = i + 1;
+                            break;
+                        }
+                    }
+                }
+
+                ImGui.Text(partyName);
+                ImGui.SameLine(200);
+                ImGui.SetNextItemWidth(200);
+                if (ImGui.Combo("##assign", ref selectedIndex, comboLabels))
+                {
+                    if (selectedIndex == 0)
+                        _config.PlayerNameOverrides.Remove(partyName);
+                    else
+                        _config.PlayerNameOverrides[partyName] = _staticPlayers[selectedIndex - 1].Id;
+                    _config.Save();
+
+                    // Re-run matching with updated overrides
+                    _partyMatching.MatchParty(_staticPlayers);
+                }
+
+                ImGui.PopID();
             }
         }
+        else
+        {
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Join a party to assign players.");
+        }
 
-        // Unmatched party members
-        if (_partyMatching.UnmatchedPartyMembers.Count > 0)
+        // Show saved overrides (for players not currently in party)
+        var savedOverrides = _config.PlayerNameOverrides
+            .Where(kv => !partyNames.Contains(kv.Key))
+            .ToList();
+
+        if (savedOverrides.Count > 0)
         {
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "Unmatched Party Members:");
-            foreach (var name in _partyMatching.UnmatchedPartyMembers)
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Saved Associations (not in party)");
+            ImGui.Separator();
+
+            string? keyToRemove = null;
+            foreach (var (charName, playerId) in savedOverrides)
             {
-                ImGui.BulletText(name);
+                var playerName = _staticPlayers.FirstOrDefault(p => p.Id == playerId)?.Name ?? playerId[..8];
+                ImGui.BulletText($"{charName} -> {playerName}");
+                ImGui.SameLine();
+                ImGui.PushID($"rm_{charName}");
+                if (ImGui.SmallButton("X"))
+                    keyToRemove = charName;
+                ImGui.PopID();
             }
-            ImGui.TextDisabled("Use manual overrides in the config to link these players.");
+
+            if (keyToRemove != null)
+            {
+                _config.PlayerNameOverrides.Remove(keyToRemove);
+                _config.Save();
+            }
         }
 
-        // Unmatched planner players
-        if (_partyMatching.UnmatchedPlayers.Count > 0)
+        ImGui.Spacing();
+        if (ImGui.Button("Refresh"))
         {
-            ImGui.Spacing();
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Unmatched Planner Players:");
-            foreach (var player in _partyMatching.UnmatchedPlayers)
+            _isFetchingRoster = true;
+            Task.Run(async () =>
             {
-                ImGui.BulletText($"{player.Name} ({player.Job})");
-            }
+                var priority = await _apiClient.GetPriorityAsync();
+                if (priority != null)
+                    _staticPlayers = priority.Players;
+                _isFetchingRoster = false;
+            });
         }
     }
 
@@ -233,7 +413,7 @@ public class ConfigWindow : Window, IDisposable
         // Auto-log mode
         ImGui.Text("Auto-Log Mode");
         var modes = new[] { "Confirm", "Auto", "Manual" };
-        if (ImGui.Combo("##autolog", ref _selectedAutoLogMode, modes, modes.Length))
+        if (ImGui.Combo("##autolog", ref _selectedAutoLogMode, modes))
         {
             _config.AutoLogMode = (AutoLogMode)_selectedAutoLogMode;
             _config.Save();

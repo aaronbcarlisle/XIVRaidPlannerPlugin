@@ -48,14 +48,13 @@ public class TerritoryService : IDisposable
         try
         {
             var sheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>();
-            if (sheet != null)
             {
                 foreach (var row in sheet)
                 {
                     var cfcId = row.ContentFinderCondition.RowId;
                     if (cfcId == 0) continue;
 
-                    var cfc = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>()?.GetRow(cfcId);
+                    var cfc = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>().GetRowOrDefault(cfcId);
                     if (cfc == null) continue;
 
                     var name = cfc.Value.Name.ToString();
@@ -78,8 +77,13 @@ public class TerritoryService : IDisposable
             _log.Warning($"Failed to build territory map from Lumina: {ex.Message}");
         }
 
-        // Hardcoded fallbacks for known savage territories (Dawntrail 7.4 - AAC Heavyweight)
-        // These are added if not already resolved from Lumina.
+        // Hardcoded fallbacks for known savage territories
+        // Anabaseios (Pandaemonium tier 3)
+        AddFallback(1148, 1, "P9S");
+        AddFallback(1150, 2, "P10S");
+        AddFallback(1152, 3, "P11S");
+        AddFallback(1154, 4, "P12S");
+        // AAC Heavyweight (Dawntrail 7.4) - placeholder IDs
         AddFallback(1243, 1, "M9S");
         AddFallback(1244, 2, "M10S");
         AddFallback(1245, 3, "M11S");
@@ -93,10 +97,17 @@ public class TerritoryService : IDisposable
         _savageTerritories.TryAdd(territoryId, (floor, name));
     }
 
+    // Ordinal words to numbers for duty names like "The Ninth Circle (Savage)"
+    private static readonly Dictionary<string, int> Ordinals = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["First"] = 1, ["Second"] = 2, ["Third"] = 3, ["Fourth"] = 4,
+        ["Fifth"] = 5, ["Sixth"] = 6, ["Seventh"] = 7, ["Eighth"] = 8,
+        ["Ninth"] = 9, ["Tenth"] = 10, ["Eleventh"] = 11, ["Twelfth"] = 12,
+    };
+
     private static (int Floor, string Name)? ParseSavageDutyName(string dutyName)
     {
-        // Match patterns like "AAC Heavyweight M1 (Savage)" -> floor 1
-        // The number in "M1", "M2", etc. maps to floor via (n-1)%4+1
+        // Pattern 1: "AAC Heavyweight M1 (Savage)" -> M1S, floor 1
         for (var i = 0; i < dutyName.Length - 1; i++)
         {
             if (dutyName[i] == 'M' && char.IsDigit(dutyName[i + 1]))
@@ -112,6 +123,38 @@ public class TerritoryService : IDisposable
                     return (floor, floorName);
                 }
             }
+        }
+
+        // Pattern 2: "... The Ninth Circle (Savage)" -> P9S, floor 1
+        // Covers Pandaemonium (Asphodelos, Abyssos, Anabaseios)
+        foreach (var (word, num) in Ordinals)
+        {
+            if (dutyName.Contains(word, StringComparison.OrdinalIgnoreCase) &&
+                dutyName.Contains("Circle", StringComparison.OrdinalIgnoreCase))
+            {
+                var floor = (num - 1) % 4 + 1;
+                var floorName = $"P{num}S";
+                return (floor, floorName);
+            }
+        }
+
+        // Pattern 3: "Eden's ... (Savage)" with ordinals -> E1S-E12S
+        foreach (var (word, num) in Ordinals)
+        {
+            if (dutyName.Contains(word, StringComparison.OrdinalIgnoreCase) &&
+                dutyName.Contains("Eden", StringComparison.OrdinalIgnoreCase))
+            {
+                var floor = (num - 1) % 4 + 1;
+                var floorName = $"E{num}S";
+                return (floor, floorName);
+            }
+        }
+
+        // Pattern 4: Generic savage duty — still register it as floor 1 so detection works
+        if (dutyName.Contains("Savage", StringComparison.OrdinalIgnoreCase))
+        {
+            // Use the duty name as-is for display
+            return (1, dutyName.Replace("(Savage)", "").Trim());
         }
 
         return null;
@@ -139,6 +182,14 @@ public class TerritoryService : IDisposable
                 OnSavageExited?.Invoke();
             }
         }
+    }
+
+    /// <summary>Check current territory on demand (e.g., when plugin loads while already in an instance).</summary>
+    public void CheckCurrentTerritory()
+    {
+        var territoryId = _clientState.TerritoryType;
+        if (territoryId != 0)
+            OnTerritoryChanged(territoryId);
     }
 
     public void Dispose()

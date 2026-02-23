@@ -15,7 +15,7 @@ namespace XIVRaidPlannerPlugin.Api;
 /// </summary>
 public class RaidPlannerClient : IDisposable
 {
-    private readonly HttpClient _httpClient;
+    private HttpClient _httpClient;
     private readonly Configuration _config;
     private readonly IPluginLog _log;
 
@@ -28,17 +28,23 @@ public class RaidPlannerClient : IDisposable
     {
         _config = config;
         _log = log;
-        _httpClient = new HttpClient();
-        UpdateAuth();
+        _httpClient = CreateHttpClient();
     }
 
-    /// <summary>Update the HttpClient base address and auth header from config.</summary>
+    /// <summary>Recreate the HttpClient with current config (BaseAddress can only be set once).</summary>
     public void UpdateAuth()
     {
+        _httpClient.Dispose();
+        _httpClient = CreateHttpClient();
+    }
+
+    private HttpClient CreateHttpClient()
+    {
         var baseUrl = _config.ApiBaseUrl.TrimEnd('/');
-        _httpClient.BaseAddress = new Uri(baseUrl);
-        _httpClient.DefaultRequestHeaders.Authorization =
+        var client = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        return client;
     }
 
     // ==================== Health ====================
@@ -67,6 +73,13 @@ public class RaidPlannerClient : IDisposable
     public async Task<List<StaticGroupInfo>> GetStaticGroupsAsync()
     {
         return await GetAsync<List<StaticGroupInfo>>("/api/static-groups") ?? new();
+    }
+
+    // ==================== Tiers ====================
+
+    public async Task<List<TierInfo>> GetTiersAsync(string groupId)
+    {
+        return await GetAsync<List<TierInfo>>($"/api/static-groups/{groupId}/tiers") ?? new();
     }
 
     // ==================== Priority ====================

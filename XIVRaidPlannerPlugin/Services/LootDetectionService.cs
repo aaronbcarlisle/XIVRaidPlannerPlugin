@@ -47,7 +47,7 @@ public class LootDetectionService : IDisposable
         // System messages for loot distribution
         // XivChatType 2105 = LootNotice (item obtained)
         // XivChatType 62 = SystemMessage
-        if (type != XivChatType.LootNotice && type != (XivChatType)2105 && type != XivChatType.SystemMessage)
+        if (type != (XivChatType)2105 && type != XivChatType.SystemMessage)
             return;
 
         try
@@ -69,7 +69,7 @@ public class LootDetectionService : IDisposable
                 else if (payload is Dalamud.Game.Text.SeStringHandling.Payloads.ItemPayload itemPayload)
                 {
                     itemId = itemPayload.ItemId;
-                    itemName = itemPayload.Item?.Name?.ToString();
+                    itemName = itemPayload.DisplayName;
                 }
             }
 
@@ -109,7 +109,7 @@ public class LootDetectionService : IDisposable
 
         try
         {
-            var item = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>()?.GetRow(itemId);
+            var item = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId);
             if (item == null) return null;
 
             var equipSlotCategory = item.Value.EquipSlotCategory.RowId;
