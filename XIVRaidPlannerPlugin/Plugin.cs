@@ -29,6 +29,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
     [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
+    [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private const string CommandName = "/xrp";
@@ -177,7 +178,7 @@ public sealed class Plugin : IDalamudPlugin
                     ? _cachedPriority.TierFloors[floor - 1]
                     : $"Floor {floor}";
 
-                _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName);
+                _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName, Configuration.DefaultTierName);
                 _overlayWindow.IsOpen = true;
 
                 // Share player list with config window and run matching
@@ -419,7 +420,7 @@ public sealed class Plugin : IDalamudPlugin
             var floorName = floor <= _cachedPriority.TierFloors.Count
                 ? _cachedPriority.TierFloors[floor - 1]
                 : $"Floor {floor}";
-            _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName);
+            _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName, Configuration.DefaultTierName);
         }
     }
 }

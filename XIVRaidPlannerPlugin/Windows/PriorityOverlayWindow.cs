@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using XIVRaidPlannerPlugin.Api;
@@ -23,15 +24,36 @@ public class PriorityOverlayWindow : Window, IDisposable
         ["caster"] = new Vector4(0.706f, 0.353f, 0.831f, 1f),   // #b45ad4
     };
 
+    // Job abbreviation -> ClassJob ID (for icon lookup: 62100 + ID = framed icon)
+    private static readonly Dictionary<string, uint> JobIconIds = new()
+    {
+        ["PLD"] = 19, ["WAR"] = 21, ["DRK"] = 32, ["GNB"] = 37,
+        ["WHM"] = 24, ["SCH"] = 28, ["AST"] = 33, ["SGE"] = 40,
+        ["MNK"] = 20, ["DRG"] = 22, ["NIN"] = 30, ["SAM"] = 34, ["RPR"] = 39, ["VPR"] = 41,
+        ["BRD"] = 23, ["MCH"] = 31, ["DNC"] = 38,
+        ["BLM"] = 25, ["SMN"] = 27, ["RDM"] = 35, ["PCT"] = 42,
+    };
+
     private static readonly Vector4 ColorAccent = new(0.298f, 0.722f, 0.659f, 1f);
     private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);
     private static readonly Vector4 ColorError = new(0.937f, 0.267f, 0.267f, 1f);
     private static readonly Vector4 ColorMuted = new(0.4f, 0.4f, 0.45f, 1f);
 
+    // Floor colors matching the web app design system
+    private static readonly Dictionary<int, Vector4> FloorColors = new()
+    {
+        [1] = new Vector4(0.133f, 0.773f, 0.369f, 1f),  // #22c55e - Floor 1 (Accessories)
+        [2] = new Vector4(0.231f, 0.510f, 0.965f, 1f),  // #3b82f6 - Floor 2 (Left Side)
+        [3] = new Vector4(0.659f, 0.333f, 0.969f, 1f),  // #a855f7 - Floor 3 (Body)
+        [4] = new Vector4(0.961f, 0.620f, 0.043f, 1f),  // #f59e0b - Floor 4 (Weapon)
+    };
+
     private PriorityResponse? _priorityData;
     private string? _currentFloorKey;
+    private int _currentFloor;
     private string _floorName = "";
     private string _staticName = "";
+    private string _tierName = "";
 
     // Track logged entries: key = "playerId|slot"
     private readonly HashSet<string> _loggedEntries = new();
@@ -63,17 +85,26 @@ public class PriorityOverlayWindow : Window, IDisposable
             MaximumSize = new Vector2(1200, 800),
         };
 
-        // Semi-transparent background
-        BgAlpha = 0.85f;
+        // Mostly opaque background for readability
+        BgAlpha = 0.95f;
     }
 
-    public void SetPriorityData(PriorityResponse? data, int floor, string floorName, string staticName = "")
+    public void SetPriorityData(PriorityResponse? data, int floor, string floorName, string staticName = "", string tierName = "")
     {
         _priorityData = data;
         _currentFloorKey = $"floor{floor}";
+        _currentFloor = floor;
         _floorName = floorName;
         if (!string.IsNullOrEmpty(staticName))
             _staticName = staticName;
+        if (!string.IsNullOrEmpty(tierName))
+            _tierName = tierName;
+
+        // Title bar: "XIV Raid Planner | <Static Name>"
+        if (!string.IsNullOrEmpty(_staticName))
+            WindowName = $"XIV Raid Planner  |  {_staticName}###XIVRaidPlanner";
+        else
+            WindowName = $"XIV Raid Planner###XIVRaidPlanner";
     }
 
     public void ClearData()
@@ -127,11 +158,12 @@ public class PriorityOverlayWindow : Window, IDisposable
             return;
         }
 
-        // Header — show static name if available
-        var headerLabel = !string.IsNullOrEmpty(_staticName)
-            ? $"{_staticName} - {_floorName}"
-            : $"XIV Raid Planner - {_floorName}";
-        ImGui.TextColored(ColorAccent, headerLabel);
+        // Subheader: tier name - floor name in floor color, week in gray
+        var floorColor = FloorColors.GetValueOrDefault(_currentFloor, ColorAccent);
+        var tierLabel = !string.IsNullOrEmpty(_tierName)
+            ? $"{char.ToUpper(_tierName[0])}{_tierName[1..]} - {_floorName}"
+            : _floorName;
+        ImGui.TextColored(floorColor, tierLabel);
         ImGui.SameLine();
         ImGui.TextDisabled($"Week {_priorityData.CurrentWeek}");
         ImGui.Separator();
@@ -188,6 +220,8 @@ public class PriorityOverlayWindow : Window, IDisposable
                                 if (isLogged)
                                 {
                                     // Logged: dim the row and show checkmark
+                                    DrawJobIcon(entry.Job, new Vector2(16, 16), true);
+                                    ImGui.SameLine();
                                     ImGui.TextColored(ColorMuted, $"{row + 1}. {entry.PlayerName}");
                                     ImGui.SameLine();
                                     ImGui.TextColored(ColorSuccess, "OK");
@@ -196,8 +230,10 @@ public class PriorityOverlayWindow : Window, IDisposable
                                 {
                                     var color = GetRoleColor(entry.Job);
 
-                                    // Rank + player name with role color
-                                    ImGui.TextColored(color, $"{row + 1}. {entry.PlayerName} ({entry.Job})");
+                                    // Job icon + rank + player name with role color
+                                    DrawJobIcon(entry.Job, new Vector2(16, 16));
+                                    ImGui.SameLine();
+                                    ImGui.TextColored(color, $"{row + 1}. {entry.PlayerName}");
                                     ImGui.SameLine();
                                     ImGui.TextDisabled($"[{entry.Score}]");
 
@@ -239,6 +275,21 @@ public class PriorityOverlayWindow : Window, IDisposable
             {
                 OnMarkFloorCleared?.Invoke();
             }
+        }
+    }
+
+    private static void DrawJobIcon(string jobAbbrev, Vector2 size, bool dimmed = false)
+    {
+        if (JobIconIds.TryGetValue(jobAbbrev.ToUpperInvariant(), out var jobId))
+        {
+            var iconId = 62100u + jobId; // Framed style icons
+            var tex = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrEmpty();
+            var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : new Vector4(1, 1, 1, 1);
+            ImGui.Image(tex.Handle, size, new Vector2(0, 0), new Vector2(1, 1), tint);
+        }
+        else
+        {
+            ImGui.Text(jobAbbrev);
         }
     }
 

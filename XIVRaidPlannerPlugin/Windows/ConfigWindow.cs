@@ -214,6 +214,12 @@ public class ConfigWindow : Window, IDisposable
                 if (_staticGroups[i].Id == _config.DefaultGroupId)
                 {
                     _selectedGroupIndex = i;
+                    // Ensure display name is populated from API data
+                    if (string.IsNullOrEmpty(_config.DefaultGroupName))
+                    {
+                        _config.DefaultGroupName = _staticGroups[i].Name;
+                        _config.Save();
+                    }
                     break;
                 }
             }
@@ -273,6 +279,12 @@ public class ConfigWindow : Window, IDisposable
                     if (_tiers[i].Id == _config.DefaultTierId)
                     {
                         _selectedTierIndex = i;
+                        // Ensure display name is populated from API data
+                        if (string.IsNullOrEmpty(_config.DefaultTierName))
+                        {
+                            _config.DefaultTierName = _tiers[i].TierId;
+                            _config.Save();
+                        }
                         break;
                     }
                 }
@@ -283,6 +295,7 @@ public class ConfigWindow : Window, IDisposable
                 if (_selectedTierIndex >= 0 && _selectedTierIndex < _tiers.Count)
                 {
                     _config.DefaultTierId = _tiers[_selectedTierIndex].Id;
+                    _config.DefaultTierName = _tiers[_selectedTierIndex].TierId;
                     _config.Save();
                 }
             }

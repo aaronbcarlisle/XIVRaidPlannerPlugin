@@ -28,6 +28,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Selected tier UUID.</summary>
     public string DefaultTierId { get; set; } = string.Empty;
 
+    /// <summary>Display name of the selected tier (for overlay header).</summary>
+    public string DefaultTierName { get; set; } = string.Empty;
+
     /// <summary>How loot logging should work.</summary>
     public AutoLogMode AutoLogMode { get; set; } = AutoLogMode.Confirm;
 
