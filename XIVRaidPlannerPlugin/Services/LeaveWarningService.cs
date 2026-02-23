@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Plugin.Services;
@@ -32,12 +31,14 @@ public class LeaveWarningService
     /// Call this when the leave duty dialog appears.
     /// </summary>
     /// <param name="currentPlayerId">The planner player ID of the current user.</param>
-    /// <param name="distributedLoot">Loot that has already been distributed this session.</param>
+    /// <param name="distributedLoot">Loot that has already been distributed this session (auto-detected).</param>
     /// <param name="floorPriority">Priority data for the current floor.</param>
+    /// <param name="manuallyLoggedEntries">Entries logged manually via overlay (format: "playerId|slot").</param>
     public void CheckLeaveWarning(
         string? currentPlayerId,
         List<LootEvent> distributedLoot,
-        Dictionary<string, List<PriorityEntry>>? floorPriority)
+        Dictionary<string, List<PriorityEntry>>? floorPriority,
+        IReadOnlySet<string>? manuallyLoggedEntries = null)
     {
         ShouldShowWarning = false;
         WarningItems.Clear();
@@ -48,11 +49,17 @@ public class LeaveWarningService
         // Check each drop type in the floor priority
         foreach (var (dropType, priorityList) in floorPriority)
         {
-            // Check if this item has already been distributed
+            // Check if this item has already been distributed (auto-detected via chat)
             var isDistributed = distributedLoot.Any(l =>
                 (l.GearSlot == dropType) ||
                 (l.MaterialType == dropType) ||
                 (dropType == "ring" && (l.GearSlot == "ring1" || l.GearSlot == "ring2")));
+
+            // Also check if ANY player has been manually logged for this drop type
+            if (!isDistributed && manuallyLoggedEntries != null)
+            {
+                isDistributed = manuallyLoggedEntries.Any(e => e.EndsWith($"|{dropType}"));
+            }
 
             if (isDistributed) continue;
 

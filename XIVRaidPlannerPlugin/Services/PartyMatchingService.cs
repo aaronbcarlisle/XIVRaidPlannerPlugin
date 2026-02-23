@@ -89,7 +89,17 @@ public class PartyMatchingService
     /// <summary>Get the planner player ID for a given in-game character name.</summary>
     public string? GetPlayerIdForName(string characterName)
     {
-        return CurrentMatches.TryGetValue(characterName.Trim(), out var playerId) ? playerId : null;
+        var trimmed = characterName.Trim();
+
+        // Check matched party members first
+        if (CurrentMatches.TryGetValue(trimmed, out var playerId))
+            return playerId;
+
+        // Fallback: check manual overrides directly (handles solo/unmatched cases)
+        if (_config.PlayerNameOverrides.TryGetValue(trimmed, out var overrideId))
+            return overrideId;
+
+        return null;
     }
 
     /// <summary>Add a manual override and re-match.</summary>

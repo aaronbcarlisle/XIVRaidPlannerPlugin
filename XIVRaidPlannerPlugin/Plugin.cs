@@ -28,6 +28,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IPartyList PartyList { get; private set; } = null!;
     [PluginService] internal static IPlayerState PlayerState { get; private set; } = null!;
     [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
+    [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
 
     private const string CommandName = "/xrp";
@@ -67,7 +68,7 @@ public sealed class Plugin : IDalamudPlugin
         _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState);
         _overlayWindow = new PriorityOverlayWindow();
         _lootConfirmWindow = new LootConfirmationWindow();
-        _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning);
+        _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
 
         WindowSystem.AddWindow(_configWindow);
         WindowSystem.AddWindow(_overlayWindow);
@@ -174,7 +175,7 @@ public sealed class Plugin : IDalamudPlugin
                     ? _cachedPriority.TierFloors[floor - 1]
                     : $"Floor {floor}";
 
-                _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName);
+                _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName);
                 _overlayWindow.IsOpen = true;
 
                 // Share player list with config window and run matching
@@ -195,28 +196,43 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnSelectYesnoSetup(AddonEvent type, AddonArgs args)
     {
+        Log.Information($"SelectYesno triggered — floor={_territoryService.CurrentFloor}, " +
+                        $"hasPriority={_cachedPriority != null}, leaveWarning={Configuration.EnableLeaveWarning}");
+
         // Only check when we're in a savage instance with priority data
         if (_territoryService.CurrentFloor == null || _cachedPriority == null || !Configuration.EnableLeaveWarning)
             return;
 
         // Find the current player's planner ID from their character name
         var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+        Log.Information($"Player: loaded={PlayerState.IsLoaded}, name={charName ?? "null"}");
         if (string.IsNullOrEmpty(charName))
             return;
 
         var currentPlayerId = _partyMatching.GetPlayerIdForName(charName);
+        Log.Information($"Matched player ID: {currentPlayerId ?? "null"}");
 
         // Get the floor priority data
         var floorKey = $"floor{_territoryService.CurrentFloor.Value}";
         if (!_cachedPriority.Priority.TryGetValue(floorKey, out var floorPriority))
             return;
 
-        _leaveWarning.CheckLeaveWarning(currentPlayerId, _lootDetection.DistributedLoot, floorPriority);
+        Log.Information($"Leave check: player={currentPlayerId ?? "null"}, " +
+                        $"detected={_lootDetection.DistributedLoot.Count}, " +
+                        $"manuallyLogged={_overlayWindow.LoggedEntries.Count}, " +
+                        $"drops={floorPriority.Count}");
+
+        _leaveWarning.CheckLeaveWarning(currentPlayerId, _lootDetection.DistributedLoot,
+            floorPriority, _overlayWindow.LoggedEntries);
 
         if (_leaveWarning.ShouldShowWarning)
         {
             _leaveWarningWindow.IsOpen = true;
-            Log.Information("Leave warning shown — player has unclaimed priority loot");
+            Log.Information($"Leave warning shown — {_leaveWarning.WarningItems.Count} unclaimed priority items");
+        }
+        else
+        {
+            Log.Information("Leave check passed — no unclaimed priority loot");
         }
     }
 
@@ -292,12 +308,14 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     Log.Information($"Manual log success: {slot} -> {playerName}");
                     ChatGui.Print($"[XRP] Logged {slot} -> {playerName}");
+                    _overlayWindow.MarkAsLogged(playerId, slot, playerName);
                     await RefreshPriority();
                 }
                 else
                 {
                     Log.Error($"Manual log failed: {slot} -> {playerName}");
                     ChatGui.PrintError($"[XRP] Failed to log {slot} -> {playerName}");
+                    _overlayWindow.MarkLogFailed(slot, playerName);
                 }
             }
             catch (System.Exception ex)
@@ -362,7 +380,7 @@ public sealed class Plugin : IDalamudPlugin
             var weekData = await _apiClient.GetCurrentWeekAsync();
             var week = weekData?.CurrentWeek ?? 1;
 
-            await _apiClient.MarkFloorClearedAsync(new MarkFloorClearedRequest
+            var success = await _apiClient.MarkFloorClearedAsync(new MarkFloorClearedRequest
             {
                 WeekNumber = week,
                 Floor = floorName,
@@ -370,7 +388,11 @@ public sealed class Plugin : IDalamudPlugin
                 Notes = "Logged via Dalamud plugin",
             });
 
-            Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
+            if (success)
+            {
+                _overlayWindow.MarkFloorCleared();
+                Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
+            }
         });
     }
 
@@ -386,7 +408,7 @@ public sealed class Plugin : IDalamudPlugin
             var floorName = floor <= _cachedPriority.TierFloors.Count
                 ? _cachedPriority.TierFloors[floor - 1]
                 : $"Floor {floor}";
-            _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName);
+            _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName);
         }
     }
 }

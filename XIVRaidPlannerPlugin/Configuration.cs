@@ -22,6 +22,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Selected static group UUID.</summary>
     public string DefaultGroupId { get; set; } = string.Empty;
 
+    /// <summary>Display name of the selected static group (for overlay header).</summary>
+    public string DefaultGroupName { get; set; } = string.Empty;
+
     /// <summary>Selected tier UUID.</summary>
     public string DefaultTierId { get; set; } = string.Empty;
 

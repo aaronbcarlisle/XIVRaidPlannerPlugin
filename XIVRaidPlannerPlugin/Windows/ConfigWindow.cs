@@ -32,6 +32,7 @@ public class ConfigWindow : Window, IDisposable
     private List<StaticGroupInfo>? _staticGroups;
     private int _selectedGroupIndex = -1;
     private int _selectedAutoLogMode;
+    private bool _autoConnectAttempted;
 
     // Static tab state
     private List<TierInfo>? _tiers;
@@ -68,6 +69,32 @@ public class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
+        // Auto-fetch statics on first draw if credentials are already configured
+        if (!_autoConnectAttempted && !_isTesting
+            && !string.IsNullOrEmpty(_config.ApiKey) && !string.IsNullOrEmpty(_config.ApiBaseUrl))
+        {
+            _autoConnectAttempted = true;
+            _isTesting = true;
+            _connectionStatus = "Connecting...";
+            _connectionStatusColor = new Vector4(1, 1, 0, 1);
+
+            Task.Run(async () =>
+            {
+                var result = await _apiClient.TestConnectionAsync();
+                if (result != null)
+                {
+                    _connectionStatus = $"Connected (API v{result.Version})";
+                    _connectionStatusColor = new Vector4(0, 1, 0, 1);
+                    _staticGroups = await _apiClient.GetStaticGroupsAsync();
+                }
+                else
+                {
+                    _connectionStatus = "";
+                }
+                _isTesting = false;
+            });
+        }
+
         if (ImGui.BeginTabBar("config_tabs"))
         {
             if (ImGui.BeginTabItem("Connection"))
@@ -197,6 +224,7 @@ public class ConfigWindow : Window, IDisposable
             if (_selectedGroupIndex >= 0 && _selectedGroupIndex < _staticGroups.Count)
             {
                 _config.DefaultGroupId = _staticGroups[_selectedGroupIndex].Id;
+                _config.DefaultGroupName = _staticGroups[_selectedGroupIndex].Name;
                 _config.DefaultTierId = string.Empty;
                 _tiers = null;
                 _selectedTierIndex = -1;
@@ -439,10 +467,18 @@ public class ConfigWindow : Window, IDisposable
 
         // Overlay scale
         ImGui.Spacing();
+        ImGui.Text("Overlay Scale");
         var scale = _config.OverlayScale;
-        if (ImGui.SliderFloat("Overlay Scale", ref scale, 0.5f, 2.0f, "%.1f"))
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 60);
+        if (ImGui.SliderFloat("##scale", ref scale, 0.5f, 2.0f, "%.1f"))
         {
             _config.OverlayScale = scale;
+            _config.Save();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Reset"))
+        {
+            _config.OverlayScale = 1.0f;
             _config.Save();
         }
     }
