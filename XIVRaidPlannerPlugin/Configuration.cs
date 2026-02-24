@@ -55,6 +55,21 @@ public class Configuration : IPluginConfiguration
     /// <summary>Warn if leaving an instance with unclaimed priority loot.</summary>
     public bool EnableLeaveWarning { get; set; } = true;
 
+    /// <summary>Show the BiS viewer in savage instances.</summary>
+    public bool ShowBisViewer { get; set; } = false;
+
+    /// <summary>Auto-sync equipped gear to web app on savage entry.</summary>
+    public bool AutoSyncGear { get; set; } = false;
+
+    /// <summary>Highlight BiS items in the Need/Greed loot window.</summary>
+    public bool EnableBisHighlighting { get; set; } = true;
+
+    /// <summary>Highlight BiS items in tome/book vendor shops.</summary>
+    public bool EnableShopHighlighting { get; set; } = true;
+
+    /// <summary>Highlight BiS items in inventory/armoury chest.</summary>
+    public bool EnableInventoryHighlighting { get; set; } = true;
+
     /// <summary>
     /// Manual overrides for matching in-game character names to planner player IDs.
     /// Key = "Firstname Lastname", Value = planner player UUID.

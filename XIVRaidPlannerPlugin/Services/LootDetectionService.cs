@@ -20,6 +20,9 @@ public class LootDetectionService : IDisposable
     /// <summary>Fired when loot is obtained by a player.</summary>
     public event Action<LootEvent>? OnLootObtained;
 
+    /// <summary>Fired when a vendor purchase is detected.</summary>
+    public event Action<PurchaseEvent>? OnItemPurchased;
+
     /// <summary>Items that have been distributed in the current instance session.</summary>
     public List<LootEvent> DistributedLoot { get; } = new();
 
@@ -44,18 +47,18 @@ public class LootDetectionService : IDisposable
 
     private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
     {
-        // System messages for loot distribution
+        // System messages for loot distribution and purchases
         // XivChatType 2105 = LootNotice (item obtained)
         // XivChatType 62 = SystemMessage
-        if (type != (XivChatType)2105 && type != XivChatType.SystemMessage)
+        // XivChatType 57 = SystemMessage (purchase/exchange)
+        if (type != (XivChatType)2105 && type != XivChatType.SystemMessage && type != (XivChatType)57)
             return;
 
         try
         {
             var text = message.TextValue;
 
-            // Parse "X obtains Y." pattern
-            // SeString payloads contain structured data - extract player and item
+            // Extract item payload from the message
             string? playerName = null;
             string? itemName = null;
             uint itemId = 0;
@@ -73,7 +76,7 @@ public class LootDetectionService : IDisposable
                 }
             }
 
-            // If we got both a player and an item from a loot message
+            // Detect loot distribution: "X obtains Y."
             if (!string.IsNullOrEmpty(playerName) && !string.IsNullOrEmpty(itemName) &&
                 text.Contains("obtain", StringComparison.OrdinalIgnoreCase))
             {
@@ -94,6 +97,32 @@ public class LootDetectionService : IDisposable
 
                 DistributedLoot.Add(lootEvent);
                 OnLootObtained?.Invoke(lootEvent);
+                return;
+            }
+
+            // Detect purchases: "You purchase ..." or "You exchange ... for ..."
+            if (!string.IsNullOrEmpty(itemName) && itemId != 0 &&
+                (text.Contains("purchase", StringComparison.OrdinalIgnoreCase) ||
+                 text.Contains("exchange", StringComparison.OrdinalIgnoreCase)))
+            {
+                var slot = ResolveItemSlot(itemId, itemName);
+                var materialType = ResolveMaterialType(itemName);
+
+                // Only fire for gear or materials (not consumables, etc.)
+                if (slot != null || materialType != null)
+                {
+                    var purchaseEvent = new PurchaseEvent
+                    {
+                        ItemName = itemName,
+                        ItemId = itemId,
+                        GearSlot = slot,
+                        MaterialType = materialType,
+                        Timestamp = DateTime.UtcNow,
+                    };
+
+                    _log.Information($"Purchase detected: {itemName} (slot={slot}, material={materialType})");
+                    OnItemPurchased?.Invoke(purchaseEvent);
+                }
             }
         }
         catch (Exception ex)
@@ -183,6 +212,24 @@ public class LootDetectionService : IDisposable
 public class LootEvent
 {
     public string PlayerName { get; set; } = string.Empty;
+    public string ItemName { get; set; } = string.Empty;
+    public uint ItemId { get; set; }
+
+    /// <summary>Resolved gear slot (null if not gear).</summary>
+    public string? GearSlot { get; set; }
+
+    /// <summary>Resolved material type (null if not a material).</summary>
+    public string? MaterialType { get; set; }
+
+    public DateTime Timestamp { get; set; }
+
+    public bool IsGear => GearSlot != null;
+    public bool IsMaterial => MaterialType != null;
+}
+
+/// <summary>Represents a detected vendor purchase event (for the current player).</summary>
+public class PurchaseEvent
+{
     public string ItemName { get; set; } = string.Empty;
     public uint ItemId { get; set; }
 

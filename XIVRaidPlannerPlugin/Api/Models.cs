@@ -106,6 +106,66 @@ public class CurrentWeekResponse
     [JsonPropertyName("maxWeek")] public int MaxWeek { get; set; }
 }
 
+// ==================== Player Gear (BiS Tracking) ====================
+
+public class MateriaSlotInfo
+{
+    [JsonPropertyName("itemId")] public int ItemId { get; set; }
+    [JsonPropertyName("itemName")] public string ItemName { get; set; } = string.Empty;
+    [JsonPropertyName("stat")] public string? Stat { get; set; }
+    [JsonPropertyName("tier")] public int? Tier { get; set; }
+    [JsonPropertyName("icon")] public string? Icon { get; set; }
+}
+
+public class GearSlotStatusDto
+{
+    [JsonPropertyName("slot")] public string Slot { get; set; } = string.Empty;
+    [JsonPropertyName("bisSource")] public string? BisSource { get; set; }
+    [JsonPropertyName("currentSource")] public string CurrentSource { get; set; } = "unknown";
+    [JsonPropertyName("hasItem")] public bool HasItem { get; set; }
+    [JsonPropertyName("isAugmented")] public bool IsAugmented { get; set; }
+    [JsonPropertyName("itemId")] public int? ItemId { get; set; }
+    [JsonPropertyName("itemName")] public string? ItemName { get; set; }
+    [JsonPropertyName("itemLevel")] public int? ItemLevel { get; set; }
+    [JsonPropertyName("itemIcon")] public string? ItemIcon { get; set; }
+    [JsonPropertyName("materia")] public List<MateriaSlotInfo> Materia { get; set; } = new();
+}
+
+public class TomeWeaponInfo
+{
+    [JsonPropertyName("pursuing")] public bool Pursuing { get; set; }
+    [JsonPropertyName("hasItem")] public bool HasItem { get; set; }
+    [JsonPropertyName("isAugmented")] public bool IsAugmented { get; set; }
+}
+
+public class PlayerGearResponse
+{
+    [JsonPropertyName("playerId")] public string PlayerId { get; set; } = string.Empty;
+    [JsonPropertyName("playerName")] public string PlayerName { get; set; } = string.Empty;
+    [JsonPropertyName("job")] public string Job { get; set; } = string.Empty;
+    [JsonPropertyName("bisLink")] public string? BisLink { get; set; }
+    [JsonPropertyName("gear")] public List<GearSlotStatusDto> Gear { get; set; } = new();
+    [JsonPropertyName("tomeWeapon")] public TomeWeaponInfo TomeWeapon { get; set; } = new();
+}
+
+// ==================== Gear Sync ====================
+
+public class GearSyncSlot
+{
+    [JsonPropertyName("slot")] public string Slot { get; set; } = string.Empty;
+    [JsonPropertyName("currentSource")] public string CurrentSource { get; set; } = "unknown";
+    [JsonPropertyName("hasItem")] public bool HasItem { get; set; }
+    [JsonPropertyName("isAugmented")] public bool IsAugmented { get; set; }
+}
+
+// ==================== Player Update (for gear sync) ====================
+
+public class SnapshotPlayerUpdateRequest
+{
+    [JsonPropertyName("gear")] public List<GearSlotStatusDto>? Gear { get; set; }
+    [JsonPropertyName("tomeWeapon")] public TomeWeaponInfo? TomeWeapon { get; set; }
+}
+
 // ==================== Health ====================
 
 public class HealthResponse

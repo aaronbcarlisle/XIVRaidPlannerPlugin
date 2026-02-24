@@ -125,6 +125,36 @@ public class RaidPlannerClient : IDisposable
             request);
     }
 
+    // ==================== Player Gear (BiS Tracking) ====================
+
+    public async Task<PlayerGearResponse?> GetPlayerGearAsync(string playerId, string? groupId = null, string? tierId = null)
+    {
+        var gid = groupId ?? _config.DefaultGroupId;
+        var tid = tierId ?? _config.DefaultTierId;
+        return await GetAsync<PlayerGearResponse>(
+            $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}/gear");
+    }
+
+    /// <summary>Sync player gear by updating their current equipment state.</summary>
+    public async Task<bool> SyncPlayerGearAsync(string playerId, SnapshotPlayerUpdateRequest request, string? groupId = null, string? tierId = null)
+    {
+        var gid = groupId ?? _config.DefaultGroupId;
+        var tid = tierId ?? _config.DefaultTierId;
+        return await PutAsync(
+            $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}",
+            request);
+    }
+
+    /// <summary>Log a vendor purchase (self-log for members).</summary>
+    public async Task<bool> CreatePurchaseLogEntryAsync(LootLogCreateRequest request)
+    {
+        request.Method = "purchase";
+        request.Notes ??= "Auto-logged via Dalamud plugin";
+        return await PostAsync(
+            $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/loot-log",
+            request);
+    }
+
     // ==================== HTTP Helpers ====================
 
     private async Task<T?> GetAsync<T>(string endpoint) where T : class
@@ -166,6 +196,28 @@ public class RaidPlannerClient : IDisposable
         catch (Exception ex)
         {
             _log.Error($"POST {endpoint} error: {ex.Message}");
+            return false;
+        }
+    }
+
+    private async Task<bool> PutAsync<T>(string endpoint, T body)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(body, JsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PutAsync(endpoint, content);
+            response.EnsureSuccessStatusCode();
+            return true;
+        }
+        catch (HttpRequestException ex)
+        {
+            _log.Error($"PUT {endpoint} failed: {ex.StatusCode} - {ex.Message}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"PUT {endpoint} error: {ex.Message}");
             return false;
         }
     }

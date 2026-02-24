@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Dalamud.Game.Addon.Lifecycle;
@@ -43,6 +44,10 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PartyMatchingService _partyMatching;
     private readonly LootDetectionService _lootDetection;
     private readonly LeaveWarningService _leaveWarning;
+    private readonly ItemMappingService _itemMapping;
+    private readonly BiSDataService _bisData;
+    private readonly InventoryService _inventoryService;
+    private readonly AddonHighlightService _addonHighlight;
 
     // Windows
     public readonly WindowSystem WindowSystem = new("XIVRaidPlannerPlugin");
@@ -50,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PriorityOverlayWindow _overlayWindow;
     private readonly LootConfirmationWindow _lootConfirmWindow;
     private readonly LeaveWarningWindow _leaveWarningWindow;
+    private readonly BiSViewerWindow _bisViewerWindow;
 
     // Cached priority data
     private PriorityResponse? _cachedPriority;
@@ -64,22 +70,30 @@ public sealed class Plugin : IDalamudPlugin
         _partyMatching = new PartyMatchingService(PartyList, Configuration, Log);
         _lootDetection = new LootDetectionService(ChatGui, DataManager, Log);
         _leaveWarning = new LeaveWarningService(Configuration, Log);
+        _itemMapping = new ItemMappingService(DataManager, Log);
+        _bisData = new BiSDataService(_apiClient, _partyMatching, _itemMapping, Log);
+        _inventoryService = new InventoryService(DataManager, Log);
+        _addonHighlight = new AddonHighlightService(_itemMapping, Configuration, AddonLifecycle, Log);
+        _addonHighlight.Register();
 
         // Initialize windows
         _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState);
         _overlayWindow = new PriorityOverlayWindow(Configuration);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
+        _bisViewerWindow = new BiSViewerWindow(_bisData, Configuration);
 
         WindowSystem.AddWindow(_configWindow);
         WindowSystem.AddWindow(_overlayWindow);
         WindowSystem.AddWindow(_lootConfirmWindow);
         WindowSystem.AddWindow(_leaveWarningWindow);
+        WindowSystem.AddWindow(_bisViewerWindow);
 
         // Wire up events
         _territoryService.OnSavageEntered += OnSavageEntered;
         _territoryService.OnSavageExited += OnSavageExited;
         _lootDetection.OnLootObtained += OnLootObtained;
+        _lootDetection.OnItemPurchased += OnItemPurchased;
         _overlayWindow.OnManualLog += OnManualLog;
         _overlayWindow.OnMarkFloorCleared += OnMarkFloorCleared;
         _overlayWindow.OnRefresh += OnRefreshRequested;
@@ -88,7 +102,7 @@ public sealed class Plugin : IDalamudPlugin
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle priority overlay. Use '/xrp config' to open settings.",
+            HelpMessage = "Toggle priority overlay. '/xrp bis' for BiS viewer. '/xrp sync' to sync gear. '/xrp config' for settings.",
         });
 
         // Register UI drawing
@@ -127,6 +141,7 @@ public sealed class Plugin : IDalamudPlugin
         _territoryService.OnSavageEntered -= OnSavageEntered;
         _territoryService.OnSavageExited -= OnSavageExited;
         _lootDetection.OnLootObtained -= OnLootObtained;
+        _lootDetection.OnItemPurchased -= OnItemPurchased;
         _overlayWindow.OnManualLog -= OnManualLog;
         _overlayWindow.OnMarkFloorCleared -= OnMarkFloorCleared;
         _overlayWindow.OnRefresh -= OnRefreshRequested;
@@ -138,8 +153,10 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.Dispose();
         _lootConfirmWindow.Dispose();
         _leaveWarningWindow.Dispose();
+        _bisViewerWindow.Dispose();
 
         // Dispose services
+        _addonHighlight.Dispose();
         _territoryService.Dispose();
         _lootDetection.Dispose();
         _apiClient.Dispose();
@@ -160,6 +177,12 @@ public sealed class Plugin : IDalamudPlugin
             case "settings":
                 ToggleConfigUi();
                 break;
+            case "bis":
+                ToggleBisViewer();
+                break;
+            case "sync":
+                SyncGear();
+                break;
             default:
                 ToggleOverlay();
                 break;
@@ -168,6 +191,86 @@ public sealed class Plugin : IDalamudPlugin
 
     public void ToggleConfigUi() => _configWindow.Toggle();
     public void ToggleOverlay() => _overlayWindow.Toggle();
+    public void ToggleBisViewer()
+    {
+        if (!_bisViewerWindow.IsOpen)
+        {
+            // Fetch gear data if not already loaded
+            var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+            if (charName != null && _bisData.CurrentPlayerGear == null)
+            {
+                Task.Run(async () => await _bisData.FetchCurrentPlayerGearAsync(charName));
+            }
+        }
+        _bisViewerWindow.Toggle();
+    }
+    public void SyncGear()
+    {
+        if (string.IsNullOrEmpty(Configuration.ApiKey))
+        {
+            ChatGui.PrintError("[XRP] No API key configured. Use /xrp config.");
+            return;
+        }
+
+        var currentGear = _bisData.CurrentPlayerGear;
+        if (currentGear == null)
+        {
+            ChatGui.PrintError("[XRP] No BiS data loaded. Enter a savage instance or use /xrp bis first.");
+            return;
+        }
+
+        ChatGui.Print("[XRP] Syncing equipped gear...");
+
+        // Read equipped items (must happen on framework thread, which we're already on from command handler)
+        var equipped = _inventoryService.ReadEquippedGear();
+        if (equipped.Count == 0)
+        {
+            ChatGui.PrintError("[XRP] Could not read equipped gear.");
+            return;
+        }
+
+        // Build the gear update
+        var updatedGear = _inventoryService.BuildGearUpdate(equipped, currentGear.Gear);
+
+        // Count changes
+        var changes = 0;
+        for (var i = 0; i < updatedGear.Count && i < currentGear.Gear.Count; i++)
+        {
+            if (updatedGear[i].CurrentSource != currentGear.Gear[i].CurrentSource ||
+                updatedGear[i].HasItem != currentGear.Gear[i].HasItem ||
+                updatedGear[i].IsAugmented != currentGear.Gear[i].IsAugmented)
+                changes++;
+        }
+
+        if (changes == 0)
+        {
+            ChatGui.Print("[XRP] Gear already up to date.");
+            return;
+        }
+
+        // Send update to API
+        Task.Run(async () =>
+        {
+            var success = await _apiClient.SyncPlayerGearAsync(
+                currentGear.PlayerId,
+                new SnapshotPlayerUpdateRequest { Gear = updatedGear });
+
+            if (success)
+            {
+                ChatGui.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
+                _bisData.InvalidatePlayer(currentGear.PlayerId);
+
+                // Re-fetch to update the BiS viewer
+                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+                if (charName != null)
+                    await _bisData.FetchCurrentPlayerGearAsync(charName);
+            }
+            else
+            {
+                ChatGui.PrintError("[XRP] Failed to sync gear. Check connection.");
+            }
+        });
+    }
 
     // ==================== Territory Events ====================
 
@@ -220,6 +323,21 @@ public sealed class Plugin : IDalamudPlugin
                 // Share player list with config window and run matching
                 _configWindow.SetStaticPlayers(_cachedPriority.Players);
                 _partyMatching.MatchParty(_cachedPriority.Players);
+
+                // Fetch BiS data for the current player
+                _bisData.AvailablePlayers = _cachedPriority.Players;
+
+                // Set user role from the static group info
+                // (already available from the API - StaticGroupInfo.UserRole)
+                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+                if (charName != null)
+                {
+                    await _bisData.FetchCurrentPlayerGearAsync(charName);
+
+                    // Show BiS viewer if configured
+                    if (Configuration.ShowBisViewer)
+                        _bisViewerWindow.IsOpen = true;
+                }
             }
         });
     }
@@ -229,6 +347,8 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.ClearData();
         _overlayWindow.IsOpen = false;
         _leaveWarningWindow.IsOpen = false;
+        _bisViewerWindow.IsOpen = false;
+        _bisData.ClearCache();
     }
 
     // ==================== Leave Warning ====================
@@ -363,6 +483,132 @@ public sealed class Plugin : IDalamudPlugin
                 // Do nothing - user must use overlay buttons
                 break;
         }
+    }
+
+    // ==================== Purchase Detection (Phase 5A) ====================
+
+    private void OnItemPurchased(PurchaseEvent purchase)
+    {
+        if (string.IsNullOrEmpty(Configuration.ApiKey))
+            return;
+
+        // Only auto-log if the purchased item is BiS
+        if (!_itemMapping.HasData || !_itemMapping.IsBisItem(purchase.ItemId))
+        {
+            Log.Debug($"Purchased item {purchase.ItemName} is not BiS — skipping auto-log");
+            return;
+        }
+
+        // Find current player's planner ID
+        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+        if (string.IsNullOrEmpty(charName))
+            return;
+
+        var playerId = _partyMatching.GetPlayerIdForName(charName);
+        if (playerId == null)
+        {
+            // Try using the BiS data player ID if party matching hasn't run
+            playerId = _bisData.CurrentPlayerGear?.PlayerId;
+        }
+
+        if (playerId == null)
+        {
+            Log.Warning($"Could not match character to planner player for purchase logging");
+            return;
+        }
+
+        var capturedPlayerId = playerId;
+        var floorName = _territoryService.CurrentFloorName ?? "M9S"; // Default to M9S for vendor purchases
+
+        switch (Configuration.AutoLogMode)
+        {
+            case AutoLogMode.Confirm:
+                Task.Run(async () =>
+                {
+                    var weekData = await _apiClient.GetCurrentWeekAsync();
+                    var week = weekData?.CurrentWeek ?? 1;
+
+                    // Show confirmation for the purchase
+                    var lootEvent = new LootEvent
+                    {
+                        PlayerName = charName,
+                        ItemName = purchase.ItemName,
+                        ItemId = purchase.ItemId,
+                        GearSlot = purchase.GearSlot,
+                        MaterialType = purchase.MaterialType,
+                        Timestamp = DateTime.UtcNow,
+                    };
+                    _lootConfirmWindow.ShowForLoot(lootEvent, capturedPlayerId, charName, floorName, week, null);
+                });
+                break;
+
+            case AutoLogMode.Auto:
+                Task.Run(async () =>
+                {
+                    var weekData = await _apiClient.GetCurrentWeekAsync();
+                    var week = weekData?.CurrentWeek ?? 1;
+                    await LogPurchaseAsync(capturedPlayerId, purchase, floorName, week);
+                });
+                break;
+
+            case AutoLogMode.Manual:
+                // Don't auto-log
+                ChatGui.Print($"[XRP] BiS purchase detected: {purchase.ItemName}. Use /xrp sync to update.");
+                break;
+        }
+    }
+
+    private async Task<bool> LogPurchaseAsync(string playerId, PurchaseEvent purchase, string floorName, int weekNumber)
+    {
+        if (purchase.IsGear && purchase.GearSlot != null)
+        {
+            var success = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
+            {
+                WeekNumber = weekNumber,
+                Floor = floorName,
+                ItemSlot = purchase.GearSlot,
+                RecipientPlayerId = playerId,
+                Method = "purchase",
+                Notes = "Auto-logged via Dalamud plugin",
+                MarkAcquired = true,
+            });
+
+            if (success)
+            {
+                ChatGui.Print($"[XRP] Purchase logged: {purchase.ItemName}");
+                _bisData.InvalidatePlayer(playerId);
+            }
+            else
+            {
+                ChatGui.PrintError($"[XRP] Failed to log purchase: {purchase.ItemName}");
+            }
+            return success;
+        }
+
+        if (purchase.IsMaterial && purchase.MaterialType != null)
+        {
+            var success = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
+            {
+                WeekNumber = weekNumber,
+                Floor = floorName,
+                MaterialType = purchase.MaterialType,
+                RecipientPlayerId = playerId,
+                Method = "purchase",
+                Notes = "Auto-logged via Dalamud plugin",
+            });
+
+            if (success)
+            {
+                ChatGui.Print($"[XRP] Material purchase logged: {purchase.ItemName}");
+            }
+            else
+            {
+                ChatGui.PrintError($"[XRP] Failed to log material purchase: {purchase.ItemName}");
+            }
+            return success;
+        }
+
+        return false;
     }
 
     // ==================== Loot Logging ====================
