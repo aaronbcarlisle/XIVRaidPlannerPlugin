@@ -45,6 +45,14 @@ public class PriorityOverlayWindow : Window, IDisposable
     // Cached slot icon textures (loaded from embedded PNGs)
     private readonly Dictionary<string, ISharedImmediateTexture?> _slotIcons = new();
 
+    // Material type -> eligible augmentation slots
+    private static readonly Dictionary<string, string[]> MaterialSlotOptions = new()
+    {
+        ["twine"] = new[] { "head", "body", "hands", "legs", "feet" },
+        ["glaze"] = new[] { "earring", "necklace", "bracelet", "ring1", "ring2" },
+        ["solvent"] = new[] { "weapon" },
+    };
+
     private static readonly Vector4 ColorAccent = new(0.298f, 0.722f, 0.659f, 1f);
     private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);
     private static readonly Vector4 ColorError = new(0.937f, 0.267f, 0.267f, 1f);
@@ -72,6 +80,13 @@ public class PriorityOverlayWindow : Window, IDisposable
     // Floor cleared state
     private bool _floorCleared;
 
+    // Material slot selection popup state
+    private string _pendingMaterialPlayerId = "";
+    private string _pendingMaterialSlot = "";
+    private string _pendingMaterialPlayerName = "";
+    private string[]? _pendingMaterialEligibleSlots;
+    private bool _openMaterialPopup;
+
     // Temporary status message
     private string _statusMessage = "";
     private Vector4 _statusColor;
@@ -81,10 +96,13 @@ public class PriorityOverlayWindow : Window, IDisposable
     public IReadOnlySet<string> LoggedEntries => _loggedEntries;
 
     /// <summary>Fired when user clicks a "Log" button for a specific player+slot.</summary>
-    public event Action<string, string, string>? OnManualLog; // playerId, slot, playerName
+    public event Action<string, string, string, string?>? OnManualLog; // playerId, slot, playerName, slotAugmented
 
     /// <summary>Fired when user clicks "Mark Floor Cleared".</summary>
     public event Action? OnMarkFloorCleared;
+
+    /// <summary>Fired when user clicks the refresh button.</summary>
+    public event Action? OnRefresh;
 
     public PriorityOverlayWindow()
         : base("XIV Raid Planner",
@@ -156,7 +174,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         ShowStatus($"{_floorName} marked as cleared!", ColorSuccess);
     }
 
-    private void ShowStatus(string message, Vector4 color)
+    public void ShowStatus(string message, Vector4 color)
     {
         _statusMessage = message;
         _statusColor = color;
@@ -279,7 +297,46 @@ public class PriorityOverlayWindow : Window, IDisposable
                                     ImGui.PushID($"log_{dropTypes[col]}_{row}");
                                     if (ImGui.SmallButton("Log"))
                                     {
-                                        OnManualLog?.Invoke(entry.PlayerId, dropTypes[col], entry.PlayerName);
+                                        var dropSlot = dropTypes[col];
+                                        if (dropSlot is "twine" or "glaze" or "solvent")
+                                        {
+                                            // Look up player-specific augmentable slots from priority data
+                                            var playerInfo = _priorityData?.Players.Find(p => p.Id == entry.PlayerId);
+                                            string[]? eligible = null;
+                                            if (playerInfo?.AugmentableSlots != null &&
+                                                playerInfo.AugmentableSlots.TryGetValue(dropSlot, out var playerSlots))
+                                            {
+                                                eligible = playerSlots.ToArray();
+                                            }
+
+                                            // Fall back to static mapping if no player-specific data
+                                            eligible ??= MaterialSlotOptions.GetValueOrDefault(dropSlot);
+
+                                            if (eligible is { Length: 1 })
+                                            {
+                                                // Single option — log immediately
+                                                OnManualLog?.Invoke(entry.PlayerId, dropSlot, entry.PlayerName, eligible[0]);
+                                            }
+                                            else if (eligible is { Length: > 1 })
+                                            {
+                                                // Multiple options — show popup
+                                                _pendingMaterialPlayerId = entry.PlayerId;
+                                                _pendingMaterialSlot = dropSlot;
+                                                _pendingMaterialPlayerName = entry.PlayerName;
+                                                _pendingMaterialEligibleSlots = eligible;
+                                                _openMaterialPopup = true;
+                                            }
+                                            else
+                                            {
+                                                // No eligible slots — log without augmentation
+                                                OnManualLog?.Invoke(entry.PlayerId, dropSlot, entry.PlayerName, null);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Gear or universal_tomestone — no slot selection
+                                            OnManualLog?.Invoke(entry.PlayerId, dropSlot, entry.PlayerName, null);
+                                        }
                                     }
                                     ImGui.PopID();
                                 }
@@ -293,6 +350,41 @@ public class PriorityOverlayWindow : Window, IDisposable
             ImGui.EndChild();
         }
 
+        // Material slot selection popup (opened from Log button, rendered at window level)
+        if (_openMaterialPopup)
+        {
+            ImGui.OpenPopup("material_slot_select");
+            _openMaterialPopup = false;
+        }
+
+        if (ImGui.BeginPopup("material_slot_select"))
+        {
+            ImGui.TextColored(ColorAccent, $"{FormatDropName(_pendingMaterialSlot)} -> {_pendingMaterialPlayerName}");
+            ImGui.Separator();
+            ImGui.TextDisabled("Augment which slot?");
+
+            if (_pendingMaterialEligibleSlots != null)
+            {
+                for (var i = 0; i < _pendingMaterialEligibleSlots.Length; i++)
+                {
+                    var slot = _pendingMaterialEligibleSlots[i];
+                    if (ImGui.Selectable(FormatDropName(slot)))
+                    {
+                        OnManualLog?.Invoke(_pendingMaterialPlayerId, _pendingMaterialSlot, _pendingMaterialPlayerName, slot);
+                        ImGui.CloseCurrentPopup();
+                    }
+                }
+            }
+
+            ImGui.Separator();
+            if (ImGui.Selectable("Cancel"))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
         ImGui.Separator();
 
         // Status message (auto-clears after 5s)
@@ -301,7 +393,7 @@ public class PriorityOverlayWindow : Window, IDisposable
             ImGui.TextColored(_statusColor, _statusMessage);
         }
 
-        // Mark floor cleared button — always pinned at bottom
+        // Bottom bar: floor cleared + refresh
         if (_floorCleared)
         {
             ImGui.TextColored(ColorSuccess, $"{_floorName} Cleared");
@@ -312,6 +404,15 @@ public class PriorityOverlayWindow : Window, IDisposable
             {
                 OnMarkFloorCleared?.Invoke();
             }
+        }
+
+        ImGui.SameLine();
+        var availWidth = ImGui.GetContentRegionAvail().X;
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availWidth - ImGui.CalcTextSize("Refresh").X - ImGui.GetStyle().FramePadding.X * 2);
+        if (ImGui.SmallButton("Refresh"))
+        {
+            OnRefresh?.Invoke();
+            ShowStatus("Refreshing priority data...", ColorAccent);
         }
     }
 
@@ -350,6 +451,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         return drop switch
         {
             "universal_tomestone" => "Univ. Tome",
+            "tome_weapon" => "Tome Weapon",
             _ => char.ToUpper(drop[0]) + drop[1..],
         };
     }

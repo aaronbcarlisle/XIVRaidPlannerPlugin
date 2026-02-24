@@ -51,6 +51,7 @@ public class PlayerInfo
     [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
     [JsonPropertyName("job")] public string Job { get; set; } = string.Empty;
     [JsonPropertyName("role")] public string Role { get; set; } = string.Empty;
+    [JsonPropertyName("augmentableSlots")] public Dictionary<string, List<string>>? AugmentableSlots { get; set; }
 }
 
 public class PriorityEntry

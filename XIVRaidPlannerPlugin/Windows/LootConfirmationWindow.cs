@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
@@ -12,6 +13,14 @@ namespace XIVRaidPlannerPlugin.Windows;
 /// </summary>
 public class LootConfirmationWindow : Window, IDisposable
 {
+    // Material type -> eligible augmentation slots
+    private static readonly Dictionary<string, string[]> MaterialSlotOptions = new()
+    {
+        ["twine"] = new[] { "head", "body", "hands", "legs", "feet" },
+        ["glaze"] = new[] { "earring", "necklace", "bracelet", "ring1", "ring2" },
+        ["solvent"] = new[] { "weapon" },
+    };
+
     private LootEvent? _pendingLoot;
     private string _resolvedPlayerName = "";
     private string _resolvedPlayerId = "";
@@ -19,8 +28,13 @@ public class LootConfirmationWindow : Window, IDisposable
     private string _floorName = "";
     private int _weekNumber;
 
-    /// <summary>Fired when user confirms the loot log. Args: playerId, slot, materialType, floorName, weekNumber.</summary>
-    public event Action<string, string?, string?, string, int>? OnConfirm;
+    // Material slot augmentation selection
+    private int _selectedSlotIndex;
+    private string? _selectedSlotAugmented;
+    private string[]? _eligibleSlots;
+
+    /// <summary>Fired when user confirms the loot log. Args: playerId, slot, materialType, floorName, weekNumber, slotAugmented.</summary>
+    public event Action<string, string?, string?, string, int, string?>? OnConfirm;
 
     /// <summary>Fired when user skips (dismisses without logging).</summary>
     public event Action? OnSkip;
@@ -39,7 +53,7 @@ public class LootConfirmationWindow : Window, IDisposable
     }
 
     /// <summary>Show the confirmation for a detected loot event.</summary>
-    public void ShowForLoot(LootEvent loot, string playerId, string playerName, string floorName, int weekNumber)
+    public void ShowForLoot(LootEvent loot, string playerId, string playerName, string floorName, int weekNumber, string[]? playerEligibleSlots = null)
     {
         _pendingLoot = loot;
         _resolvedPlayerId = playerId;
@@ -47,6 +61,33 @@ public class LootConfirmationWindow : Window, IDisposable
         _resolvedSlot = loot.GearSlot ?? "";
         _floorName = floorName;
         _weekNumber = weekNumber;
+
+        // Initialize material slot selection using player-specific eligible slots
+        if (loot.IsMaterial && loot.MaterialType != null)
+        {
+            // Use player-specific slots if available, fall back to static mapping
+            _eligibleSlots = playerEligibleSlots;
+            if (_eligibleSlots == null && MaterialSlotOptions.TryGetValue(loot.MaterialType, out var fallbackSlots))
+                _eligibleSlots = fallbackSlots;
+
+            if (_eligibleSlots is { Length: > 0 })
+            {
+                _selectedSlotIndex = 0;
+                _selectedSlotAugmented = _eligibleSlots[0];
+            }
+            else
+            {
+                _selectedSlotIndex = 0;
+                _selectedSlotAugmented = null;
+            }
+        }
+        else
+        {
+            _eligibleSlots = null;
+            _selectedSlotIndex = 0;
+            _selectedSlotAugmented = null;
+        }
+
         IsOpen = true;
     }
 
@@ -73,6 +114,25 @@ public class LootConfirmationWindow : Window, IDisposable
         }
 
         ImGui.TextDisabled($"Floor: {_floorName}  Week: {_weekNumber}");
+
+        // Slot selection dropdown for materials with augmentable slots
+        if (_pendingLoot.IsMaterial && _eligibleSlots is { Length: > 0 })
+        {
+            ImGui.Spacing();
+            ImGui.Text("Augment slot:");
+            ImGui.SameLine();
+
+            // Build display names
+            var displayNames = new string[_eligibleSlots.Length];
+            for (var i = 0; i < _eligibleSlots.Length; i++)
+                displayNames[i] = FormatSlotName(_eligibleSlots[i]);
+
+            if (ImGui.Combo("##augment_slot", ref _selectedSlotIndex, displayNames, displayNames.Length))
+            {
+                _selectedSlotAugmented = _eligibleSlots[_selectedSlotIndex];
+            }
+        }
+
         ImGui.Spacing();
 
         // Action buttons
@@ -83,7 +143,8 @@ public class LootConfirmationWindow : Window, IDisposable
                 _pendingLoot.GearSlot,
                 _pendingLoot.MaterialType,
                 _floorName,
-                _weekNumber);
+                _weekNumber,
+                _selectedSlotAugmented);
             Close();
         }
 
@@ -107,6 +168,7 @@ public class LootConfirmationWindow : Window, IDisposable
         return slot switch
         {
             "ring1" or "ring2" => "Ring",
+            "tome_weapon" => "Tome Weapon",
             _ => char.ToUpper(slot[0]) + slot[1..],
         };
     }

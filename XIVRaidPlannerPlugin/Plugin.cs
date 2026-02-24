@@ -82,6 +82,7 @@ public sealed class Plugin : IDalamudPlugin
         _lootDetection.OnLootObtained += OnLootObtained;
         _overlayWindow.OnManualLog += OnManualLog;
         _overlayWindow.OnMarkFloorCleared += OnMarkFloorCleared;
+        _overlayWindow.OnRefresh += OnRefreshRequested;
         _lootConfirmWindow.OnConfirm += OnLootConfirmed;
 
         // Register commands
@@ -120,6 +121,7 @@ public sealed class Plugin : IDalamudPlugin
         _lootDetection.OnLootObtained -= OnLootObtained;
         _overlayWindow.OnManualLog -= OnManualLog;
         _overlayWindow.OnMarkFloorCleared -= OnMarkFloorCleared;
+        _overlayWindow.OnRefresh -= OnRefreshRequested;
         _lootConfirmWindow.OnConfirm -= OnLootConfirmed;
 
         // Dispose windows
@@ -262,6 +264,18 @@ public sealed class Plugin : IDalamudPlugin
 
         var floorName = _territoryService.CurrentFloorName ?? "Unknown";
 
+        // Look up player-specific augmentable slots for materials
+        string[]? eligibleSlots = null;
+        if (loot.IsMaterial && loot.MaterialType != null && _cachedPriority != null)
+        {
+            var playerInfo = _cachedPriority.Players.Find(p => p.Id == playerId);
+            if (playerInfo?.AugmentableSlots != null &&
+                playerInfo.AugmentableSlots.TryGetValue(loot.MaterialType, out var slots))
+            {
+                eligibleSlots = slots.ToArray();
+            }
+        }
+
         switch (Configuration.AutoLogMode)
         {
             case AutoLogMode.Confirm:
@@ -269,7 +283,7 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     var weekData = await _apiClient.GetCurrentWeekAsync();
                     var week = weekData?.CurrentWeek ?? 1;
-                    _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week);
+                    _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week, eligibleSlots);
                 });
                 break;
 
@@ -278,7 +292,9 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     var weekData = await _apiClient.GetCurrentWeekAsync();
                     var week = weekData?.CurrentWeek ?? 1;
-                    await LogLootAsync(playerId, loot.GearSlot, loot.MaterialType, floorName, week);
+                    // Auto-select slot if only one option; otherwise log without augmentation
+                    var autoSlot = eligibleSlots is { Length: 1 } ? eligibleSlots[0] : null;
+                    await LogLootAsync(playerId, loot.GearSlot, loot.MaterialType, floorName, week, autoSlot);
                     Log.Information($"Auto-logged: {loot.ItemName} -> {loot.PlayerName}");
                 });
                 break;
@@ -291,10 +307,10 @@ public sealed class Plugin : IDalamudPlugin
 
     // ==================== Loot Logging ====================
 
-    private void OnManualLog(string playerId, string slot, string playerName)
+    private void OnManualLog(string playerId, string slot, string playerName, string? slotAugmented)
     {
         var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-        Log.Information($"Manual log requested: {slot} -> {playerName} (floor={floorName}, player={playerId})");
+        Log.Information($"Manual log requested: {slot} -> {playerName} (floor={floorName}, player={playerId}, slotAugmented={slotAugmented ?? "none"})");
         ChatGui.Print($"[XRP] Logging {slot} -> {playerName}...");
 
         Task.Run(async () =>
@@ -313,7 +329,7 @@ public sealed class Plugin : IDalamudPlugin
                 else
                     gearSlot = slot;
 
-                var success = await LogLootAsync(playerId, gearSlot, materialType, floorName, week);
+                var success = await LogLootAsync(playerId, gearSlot, materialType, floorName, week, slotAugmented);
                 if (success)
                 {
                     Log.Information($"Manual log success: {slot} -> {playerName}");
@@ -336,18 +352,18 @@ public sealed class Plugin : IDalamudPlugin
         });
     }
 
-    private void OnLootConfirmed(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber)
+    private void OnLootConfirmed(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber, string? slotAugmented)
     {
         Task.Run(async () =>
         {
-            await LogLootAsync(playerId, gearSlot, materialType, floorName, weekNumber);
+            await LogLootAsync(playerId, gearSlot, materialType, floorName, weekNumber, slotAugmented);
 
             // Refresh priority after logging
             await RefreshPriority();
         });
     }
 
-    private async Task<bool> LogLootAsync(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber)
+    private async Task<bool> LogLootAsync(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber, string? slotAugmented = null)
     {
         if (materialType != null)
         {
@@ -359,7 +375,8 @@ public sealed class Plugin : IDalamudPlugin
                 RecipientPlayerId = playerId,
                 Method = "drop",
                 Notes = "Logged via Dalamud plugin",
-                MarkAugmented = true,
+                MarkAugmented = slotAugmented != null || materialType == "universal_tomestone",
+                SlotAugmented = slotAugmented,
             });
         }
 
@@ -404,6 +421,22 @@ public sealed class Plugin : IDalamudPlugin
             {
                 _overlayWindow.MarkFloorCleared();
                 Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
+            }
+        });
+    }
+
+    private void OnRefreshRequested()
+    {
+        Task.Run(async () =>
+        {
+            Log.Information("Manual refresh requested");
+            await RefreshPriority();
+
+            if (_cachedPriority != null)
+            {
+                // Re-run party matching with fresh data
+                _partyMatching.MatchParty(_cachedPriority.Players);
+                _overlayWindow.ShowStatus("Priority data refreshed", new System.Numerics.Vector4(0.133f, 0.773f, 0.369f, 1f));
             }
         });
     }
