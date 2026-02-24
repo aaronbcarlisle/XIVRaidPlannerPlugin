@@ -284,6 +284,8 @@ public sealed class Plugin : IDalamudPlugin
             if (tomeWeaponUpdate != null && !freshGear.TomeWeapon.HasItem)
                 changes++;
 
+            Log.Info($"[Sync] Comparison: {changes} gear changes, {newlyAcquired.Count} newly acquired, tomeWeapon={tomeWeaponUpdate != null}");
+
             if (changes == 0)
             {
                 ChatGui.Print("[XRP] Gear already up to date.");

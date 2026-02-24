@@ -526,8 +526,14 @@ public class BiSViewerWindow : Window, IDisposable
 
     private void OpenBisLinkInBrowser(string bisLink)
     {
-        if (bisLink.StartsWith("bis|") || bisLink.StartsWith("sl|")) return;
-        try { Process.Start(new ProcessStartInfo(bisLink) { UseShellExecute = true }); } catch { }
+        // Handle xivgear short format links (sl|..., bis|...)
+        var url = bisLink;
+        if (bisLink.StartsWith("sl|"))
+            url = $"https://xivgear.app/?page={bisLink}";
+        else if (bisLink.StartsWith("bis|"))
+            url = $"https://xivgear.app/?page={bisLink}";
+
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
 
     // ==================== Textures ====================

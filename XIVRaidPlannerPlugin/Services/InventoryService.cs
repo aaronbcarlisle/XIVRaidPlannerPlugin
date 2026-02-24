@@ -158,6 +158,19 @@ public class InventoryService
         return result;
     }
 
+    /// <summary>Check if an equipped source classification matches the BiS source target.</summary>
+    private static bool SourceMatchesBis(string equippedSource, string bisSource)
+    {
+        return bisSource switch
+        {
+            "raid" => equippedSource is "savage" or "raid",
+            "tome" => equippedSource is "tome" or "tome_up",
+            "base_tome" => equippedSource is "tome" or "base_tome",
+            "crafted" => equippedSource == "crafted",
+            _ => false,
+        };
+    }
+
     /// <summary>Resolve materia type+grade to item details via Lumina.</summary>
     private List<MateriaDetail> ResolveMateriaDetails(EquippedItem equipped, Lumina.Excel.ExcelSheet<Item> itemSheet)
     {
@@ -347,13 +360,21 @@ public class InventoryService
                 var source = ClassifySource(equippedItem.ItemId);
                 slot.CurrentSource = source;
 
-                // Check if equipped item matches BiS
+                // Check if equipped item matches BiS — try item ID first, then source match
                 if (gear.ItemId.HasValue && equippedItem.ItemId == (uint)gear.ItemId.Value)
                 {
+                    // Exact item ID match
                     slot.HasItem = true;
-                    // If tome BiS, check if it's the augmented version
                     if (gear.BisSource == "tome" && source == "tome_up")
                         slot.IsAugmented = true;
+                }
+                else if (gear.BisSource != null && SourceMatchesBis(source, gear.BisSource))
+                {
+                    // Fallback: equipped source matches or exceeds BiS source
+                    slot.HasItem = true;
+                    if (gear.BisSource == "tome" && source == "tome_up")
+                        slot.IsAugmented = true;
+                    _log.Debug($"[Inventory] Source match for {gear.Slot}: equipped={source}, bis={gear.BisSource}");
                 }
             }
             else
