@@ -67,7 +67,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Initialize windows
         _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState);
-        _overlayWindow = new PriorityOverlayWindow();
+        _overlayWindow = new PriorityOverlayWindow(Configuration);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
 
@@ -100,6 +100,12 @@ public sealed class Plugin : IDalamudPlugin
         AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
         AddonLifecycle.RegisterListener(AddonEvent.PreFinalize, "SelectYesno", OnSelectYesnoClose);
 
+        // Hook for overlay timing: show on duty complete
+        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "DutyComplete", OnDutyCompleteSetup);
+
+        // Hook for overlay timing: show on loot window open
+        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "NeedGreed", OnNeedGreedSetup);
+
         // Check if already in a savage instance (e.g., plugin loaded mid-instance)
         _territoryService.CheckCurrentTerritory();
 
@@ -115,6 +121,8 @@ public sealed class Plugin : IDalamudPlugin
 
         AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
         AddonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "SelectYesno", OnSelectYesnoClose);
+        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "DutyComplete", OnDutyCompleteSetup);
+        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "NeedGreed", OnNeedGreedSetup);
 
         _territoryService.OnSavageEntered -= OnSavageEntered;
         _territoryService.OnSavageExited -= OnSavageExited;
@@ -165,14 +173,37 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnSavageEntered(int floor)
     {
-        if (!Configuration.ShowOverlay || string.IsNullOrEmpty(Configuration.ApiKey))
+        if (string.IsNullOrEmpty(Configuration.ApiKey))
             return;
 
         _lootDetection.Reset();
 
-        // Fetch priority data
+        // Fetch priority data (always fetch, even if overlay is hidden, so data is ready)
         Task.Run(async () =>
         {
+            // Auto-detect active tier only if none is configured
+            if (!string.IsNullOrEmpty(Configuration.DefaultGroupId) && string.IsNullOrEmpty(Configuration.DefaultTierId))
+            {
+                var tiers = await _apiClient.GetTiersAsync(Configuration.DefaultGroupId);
+                var activeTier = tiers.Find(t => t.IsActive);
+                if (activeTier != null)
+                {
+                    Log.Information($"Auto-detected active tier: {activeTier.TierId} ({activeTier.Id})");
+                    Configuration.DefaultTierId = activeTier.Id;
+                    Configuration.DefaultTierName = activeTier.TierId;
+                    Configuration.Save();
+                }
+                else
+                {
+                    Log.Warning("No active tier found and no tier configured. Overlay will not show.");
+                    ChatGui.PrintError("[XRP] No active tier found. Select a tier in /xrp config.");
+                    return;
+                }
+            }
+
+            if (string.IsNullOrEmpty(Configuration.DefaultTierId))
+                return;
+
             _cachedPriority = await _apiClient.GetPriorityAsync(floor);
             if (_cachedPriority != null)
             {
@@ -181,7 +212,10 @@ public sealed class Plugin : IDalamudPlugin
                     : $"Floor {floor}";
 
                 _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName, Configuration.DefaultTierName);
-                _overlayWindow.IsOpen = true;
+
+                // Only show overlay if configured to show on entry
+                if (Configuration.ShowOverlay && Configuration.ShowOverlayOnEntry)
+                    _overlayWindow.IsOpen = true;
 
                 // Share player list with config window and run matching
                 _configWindow.SetStaticPlayers(_cachedPriority.Players);
@@ -246,6 +280,32 @@ public sealed class Plugin : IDalamudPlugin
         // Dialog closed (Yes, No, or Escape) — dismiss our overlay
         _leaveWarning.Dismiss();
         _leaveWarningWindow.IsOpen = false;
+    }
+
+    // ==================== Overlay Timing Events ====================
+
+    private void OnDutyCompleteSetup(AddonEvent type, AddonArgs args)
+    {
+        if (!Configuration.ShowOverlay || !Configuration.ShowOverlayOnDutyComplete)
+            return;
+
+        if (_cachedPriority != null && _territoryService.CurrentFloor != null)
+        {
+            Log.Information("Duty complete — showing overlay");
+            _overlayWindow.IsOpen = true;
+        }
+    }
+
+    private void OnNeedGreedSetup(AddonEvent type, AddonArgs args)
+    {
+        if (!Configuration.ShowOverlay || !Configuration.ShowOverlayOnLootWindow)
+            return;
+
+        if (_cachedPriority != null && _territoryService.CurrentFloor != null)
+        {
+            Log.Information("Loot window opened — showing overlay");
+            _overlayWindow.IsOpen = true;
+        }
     }
 
     // ==================== Loot Detection ====================

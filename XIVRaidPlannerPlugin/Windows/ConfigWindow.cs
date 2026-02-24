@@ -26,6 +26,7 @@ public class ConfigWindow : Window, IDisposable
     // UI state
     private string _apiKeyInput = "";
     private string _apiUrlInput = "";
+    private string _frontendUrlInput = "";
     private string _connectionStatus = "";
     private Vector4 _connectionStatusColor = new(1, 1, 1, 1);
     private bool _isTesting;
@@ -61,6 +62,7 @@ public class ConfigWindow : Window, IDisposable
 
         _apiKeyInput = _config.ApiKey;
         _apiUrlInput = _config.ApiBaseUrl;
+        _frontendUrlInput = _config.FrontendBaseUrl;
         _selectedAutoLogMode = (int)_config.AutoLogMode;
     }
 
@@ -135,6 +137,16 @@ public class ConfigWindow : Window, IDisposable
             _config.Save();
             _apiClient.UpdateAuth();
         }
+
+        ImGui.Spacing();
+        ImGui.Text("Frontend URL (optional, for Ctrl+Click links)");
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("##frontendurl", ref _frontendUrlInput, 256))
+        {
+            _config.FrontendBaseUrl = _frontendUrlInput;
+            _config.Save();
+        }
+        ImGui.TextDisabled("Leave blank if API and frontend share the same URL.");
 
         ImGui.Spacing();
         ImGui.Text("API Key");
@@ -214,12 +226,20 @@ public class ConfigWindow : Window, IDisposable
                 if (_staticGroups[i].Id == _config.DefaultGroupId)
                 {
                     _selectedGroupIndex = i;
-                    // Ensure display name is populated from API data
+                    // Ensure display name and share code are populated from API data
+                    var needsSave = false;
                     if (string.IsNullOrEmpty(_config.DefaultGroupName))
                     {
                         _config.DefaultGroupName = _staticGroups[i].Name;
-                        _config.Save();
+                        needsSave = true;
                     }
+                    if (string.IsNullOrEmpty(_config.DefaultGroupShareCode))
+                    {
+                        _config.DefaultGroupShareCode = _staticGroups[i].ShareCode;
+                        needsSave = true;
+                    }
+                    if (needsSave)
+                        _config.Save();
                     break;
                 }
             }
@@ -231,6 +251,7 @@ public class ConfigWindow : Window, IDisposable
             {
                 _config.DefaultGroupId = _staticGroups[_selectedGroupIndex].Id;
                 _config.DefaultGroupName = _staticGroups[_selectedGroupIndex].Name;
+                _config.DefaultGroupShareCode = _staticGroups[_selectedGroupIndex].ShareCode;
                 _config.DefaultTierId = string.Empty;
                 _tiers = null;
                 _selectedTierIndex = -1;
@@ -264,38 +285,58 @@ public class ConfigWindow : Window, IDisposable
         }
         else
         {
-            var tierNames = new string[_tiers.Count];
+            // Build tier names with "Auto" as the first option
+            var tierNames = new string[_tiers.Count + 1];
+            tierNames[0] = "Auto (active tier)";
             for (var i = 0; i < _tiers.Count; i++)
             {
                 var active = _tiers[i].IsActive ? " (active)" : "";
-                tierNames[i] = $"{_tiers[i].TierId}{active}";
+                tierNames[i + 1] = $"{_tiers[i].TierId}{active}";
             }
 
-            // Sync selected index with saved config
-            if (_selectedTierIndex < 0 && !string.IsNullOrEmpty(_config.DefaultTierId))
+            // Sync selected index with saved config (0 = Auto, 1+ = specific tier)
+            if (_selectedTierIndex < 0)
             {
-                for (var i = 0; i < _tiers.Count; i++)
+                if (string.IsNullOrEmpty(_config.DefaultTierId))
                 {
-                    if (_tiers[i].Id == _config.DefaultTierId)
+                    _selectedTierIndex = 0; // Auto
+                }
+                else
+                {
+                    for (var i = 0; i < _tiers.Count; i++)
                     {
-                        _selectedTierIndex = i;
-                        // Ensure display name is populated from API data
-                        if (string.IsNullOrEmpty(_config.DefaultTierName))
+                        if (_tiers[i].Id == _config.DefaultTierId)
                         {
-                            _config.DefaultTierName = _tiers[i].TierId;
-                            _config.Save();
+                            _selectedTierIndex = i + 1;
+                            // Ensure display name is populated from API data
+                            if (string.IsNullOrEmpty(_config.DefaultTierName))
+                            {
+                                _config.DefaultTierName = _tiers[i].TierId;
+                                _config.Save();
+                            }
+                            break;
                         }
-                        break;
                     }
+                    // If saved tier not found in list, fall back to Auto
+                    if (_selectedTierIndex < 0)
+                        _selectedTierIndex = 0;
                 }
             }
 
             if (ImGui.Combo("##tier", ref _selectedTierIndex, tierNames))
             {
-                if (_selectedTierIndex >= 0 && _selectedTierIndex < _tiers.Count)
+                if (_selectedTierIndex == 0)
                 {
-                    _config.DefaultTierId = _tiers[_selectedTierIndex].Id;
-                    _config.DefaultTierName = _tiers[_selectedTierIndex].TierId;
+                    // Auto — clear tier so auto-detection picks the active one
+                    _config.DefaultTierId = string.Empty;
+                    _config.DefaultTierName = string.Empty;
+                    _config.Save();
+                }
+                else if (_selectedTierIndex > 0 && _selectedTierIndex <= _tiers.Count)
+                {
+                    var tier = _tiers[_selectedTierIndex - 1];
+                    _config.DefaultTierId = tier.Id;
+                    _config.DefaultTierName = tier.TierId;
                     _config.Save();
                 }
             }
@@ -462,7 +503,7 @@ public class ConfigWindow : Window, IDisposable
 
         ImGui.Spacing();
 
-        // Show overlay toggle
+        // Show overlay toggle (master)
         var showOverlay = _config.ShowOverlay;
         if (ImGui.Checkbox("Show Priority Overlay", ref showOverlay))
         {
@@ -470,28 +511,39 @@ public class ConfigWindow : Window, IDisposable
             _config.Save();
         }
 
+        // Sub-options (indented, disabled if master is off)
+        if (!showOverlay) ImGui.BeginDisabled();
+        ImGui.Indent(20);
+
+        var onEntry = _config.ShowOverlayOnEntry;
+        if (ImGui.Checkbox("Show when entering raid instance", ref onEntry))
+        {
+            _config.ShowOverlayOnEntry = onEntry;
+            _config.Save();
+        }
+
+        var onDutyComplete = _config.ShowOverlayOnDutyComplete;
+        if (ImGui.Checkbox("Show when duty completes", ref onDutyComplete))
+        {
+            _config.ShowOverlayOnDutyComplete = onDutyComplete;
+            _config.Save();
+        }
+
+        var onLootWindow = _config.ShowOverlayOnLootWindow;
+        if (ImGui.Checkbox("Show when loot window opens", ref onLootWindow))
+        {
+            _config.ShowOverlayOnLootWindow = onLootWindow;
+            _config.Save();
+        }
+
+        ImGui.Unindent(20);
+        if (!showOverlay) ImGui.EndDisabled();
+
         // Leave warning toggle
         var leaveWarning = _config.EnableLeaveWarning;
         if (ImGui.Checkbox("Warn When Leaving with Unclaimed Loot", ref leaveWarning))
         {
             _config.EnableLeaveWarning = leaveWarning;
-            _config.Save();
-        }
-
-        // Overlay scale
-        ImGui.Spacing();
-        ImGui.Text("Overlay Scale");
-        var scale = _config.OverlayScale;
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 60);
-        if (ImGui.SliderFloat("##scale", ref scale, 0.5f, 2.0f, "%.1f"))
-        {
-            _config.OverlayScale = scale;
-            _config.Save();
-        }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Reset"))
-        {
-            _config.OverlayScale = 1.0f;
             _config.Save();
         }
     }

@@ -6,6 +6,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Images\*.png" />
+    <EmbeddedResource Include="Images\*.png" Exclude="Images\icon.png" />
+    <EmbeddedResource Include="Images\jobs\*.png" />
+    <None Include="Images\icon.png" CopyToOutputDirectory="PreserveNewest" Link="images\icon.png" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 using Dalamud.Interface.Textures;
@@ -42,8 +43,21 @@ public class PriorityOverlayWindow : Window, IDisposable
         "earring", "necklace", "bracelet", "ring",
     };
 
+    // Job abbreviation -> embedded PNG filename (lowercase)
+    private static readonly Dictionary<string, string> JobIconFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["PLD"] = "pld", ["WAR"] = "war", ["DRK"] = "drk", ["GNB"] = "gnb",
+        ["WHM"] = "whm", ["SCH"] = "sch", ["AST"] = "ast", ["SGE"] = "sge",
+        ["MNK"] = "mnk", ["DRG"] = "drg", ["NIN"] = "nin", ["SAM"] = "sam", ["RPR"] = "rpr", ["VPR"] = "vpr",
+        ["BRD"] = "brd", ["MCH"] = "mch", ["DNC"] = "dnc",
+        ["BLM"] = "blm", ["SMN"] = "smn", ["RDM"] = "rdm", ["PCT"] = "pct",
+    };
+
     // Cached slot icon textures (loaded from embedded PNGs)
     private readonly Dictionary<string, ISharedImmediateTexture?> _slotIcons = new();
+
+    // Cached job icon textures (loaded from embedded PNGs)
+    private readonly Dictionary<string, ISharedImmediateTexture?> _jobIcons = new();
 
     // Material type -> eligible augmentation slots
     private static readonly Dictionary<string, string[]> MaterialSlotOptions = new()
@@ -57,6 +71,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);
     private static readonly Vector4 ColorError = new(0.937f, 0.267f, 0.267f, 1f);
     private static readonly Vector4 ColorMuted = new(0.4f, 0.4f, 0.45f, 1f);
+    private static readonly Vector4 ColorLink = new(0.4f, 0.7f, 1.0f, 1f);
 
     // Floor colors matching the web app design system
     private static readonly Dictionary<int, Vector4> FloorColors = new()
@@ -66,6 +81,8 @@ public class PriorityOverlayWindow : Window, IDisposable
         [3] = new Vector4(0.659f, 0.333f, 0.969f, 1f),  // #a855f7 - Floor 3 (Body)
         [4] = new Vector4(0.961f, 0.620f, 0.043f, 1f),  // #f59e0b - Floor 4 (Weapon)
     };
+
+    private readonly Configuration _config;
 
     private PriorityResponse? _priorityData;
     private string? _currentFloorKey;
@@ -87,6 +104,15 @@ public class PriorityOverlayWindow : Window, IDisposable
     private string[]? _pendingMaterialEligibleSlots;
     private bool _openMaterialPopup;
 
+    // Confirmation popup state
+    private enum ConfirmAction { None, LogLoot, ClearFloor }
+    private ConfirmAction _confirmAction;
+    private string _confirmPlayerId = "";
+    private string _confirmSlot = "";
+    private string _confirmPlayerName = "";
+    private string? _confirmSlotAugmented;
+    private bool _openConfirmPopup;
+
     // Temporary status message
     private string _statusMessage = "";
     private Vector4 _statusColor;
@@ -104,10 +130,12 @@ public class PriorityOverlayWindow : Window, IDisposable
     /// <summary>Fired when user clicks the refresh button.</summary>
     public event Action? OnRefresh;
 
-    public PriorityOverlayWindow()
+    public PriorityOverlayWindow(Configuration config)
         : base("XIV Raid Planner",
             ImGuiWindowFlags.NoCollapse)
     {
+        _config = config;
+
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(400, 200),
@@ -123,6 +151,13 @@ public class PriorityOverlayWindow : Window, IDisposable
         {
             var resourceName = $"XIVRaidPlannerPlugin.Images.{name}.png";
             _slotIcons[name] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
+        }
+
+        // Load job icons from embedded resources
+        foreach (var (abbrev, fileName) in JobIconFileNames)
+        {
+            var resourceName = $"XIVRaidPlannerPlugin.Images.jobs.{fileName}.png";
+            _jobIcons[abbrev.ToUpperInvariant()] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
         }
     }
 
@@ -196,23 +231,34 @@ public class PriorityOverlayWindow : Window, IDisposable
             return;
         }
 
-        // Subheader: tier name - floor name in floor color, week in gray
+        // Subheader: tier name - floor name in floor color (Ctrl+Click to open web app), week in gray
         var floorColor = FloorColors.GetValueOrDefault(_currentFloor, ColorAccent);
-        var tierLabel = !string.IsNullOrEmpty(_tierName)
-            ? $"{char.ToUpper(_tierName[0])}{_tierName[1..]} - {_floorName}"
-            : _floorName;
-        ImGui.TextColored(floorColor, tierLabel);
+        if (!string.IsNullOrEmpty(_tierName))
+        {
+            var tierUrl = BuildWebAppUrl();
+            DrawLinkText($"{char.ToUpper(_tierName[0])}{_tierName[1..]}", tierUrl, floorColor);
+            ImGui.SameLine();
+            ImGui.TextColored(floorColor, "-");
+            ImGui.SameLine();
+        }
+
+        var floorUrl = BuildWebAppUrl("loot", _currentFloor);
+        DrawLinkText(_floorName, floorUrl, floorColor);
         ImGui.SameLine();
-        ImGui.TextDisabled($"Week {_priorityData.CurrentWeek}");
+
+        var weekUrl = BuildWebAppUrl("log", week: _priorityData.CurrentWeek);
+        DrawLinkText($"Week {_priorityData.CurrentWeek}", weekUrl, new Vector4(0.5f, 0.5f, 0.5f, 1f));
         ImGui.Separator();
 
         // Render priority columns for each drop type
         var dropTypes = new List<string>(floorPriority.Keys);
         var columnCount = dropTypes.Count;
 
-        // Reserve space for bottom area (button + status)
+        // Reserve space for bottom area (button + status + hint)
         var bottomHeight = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y * 2 + 2;
         if (_statusMessage.Length > 0 && DateTime.UtcNow < _statusExpiry)
+            bottomHeight += ImGui.GetTextLineHeightWithSpacing();
+        if (!string.IsNullOrEmpty(_config.DefaultGroupShareCode))
             bottomHeight += ImGui.GetTextLineHeightWithSpacing();
         var tableHeight = Math.Max(100, ImGui.GetContentRegionAvail().Y - bottomHeight);
 
@@ -275,21 +321,24 @@ public class PriorityOverlayWindow : Window, IDisposable
 
                                 if (isLogged)
                                 {
-                                    // Logged: dim the row and show checkmark
-                                    DrawJobIcon(entry.Job, new Vector2(16, 16), true);
+                                    // Logged: dim the row and show "View" link
+                                    DrawJobIcon(entry.Job, new Vector2(20, 20), true);
                                     ImGui.SameLine();
-                                    ImGui.TextColored(ColorMuted, $"{row + 1}. {entry.PlayerName}");
+                                    var playerUrl = BuildWebAppUrl("players", playerId: entry.PlayerId);
+                                    DrawLinkText($"{row + 1}. {entry.PlayerName}", playerUrl, ColorMuted);
                                     ImGui.SameLine();
-                                    ImGui.TextColored(ColorSuccess, "OK");
+                                    var logUrl = BuildWebAppUrl("log", week: _priorityData?.CurrentWeek);
+                                    DrawLinkText("View", logUrl, ColorLink);
                                 }
                                 else
                                 {
                                     var color = GetRoleColor(entry.Job);
 
-                                    // Job icon + rank + player name with role color
-                                    DrawJobIcon(entry.Job, new Vector2(16, 16));
+                                    // Job icon + rank + player name with role color (Ctrl+Click for player link)
+                                    DrawJobIcon(entry.Job, new Vector2(20, 20));
                                     ImGui.SameLine();
-                                    ImGui.TextColored(color, $"{row + 1}. {entry.PlayerName}");
+                                    var playerUrl = BuildWebAppUrl("players", playerId: entry.PlayerId);
+                                    DrawLinkText($"{row + 1}. {entry.PlayerName}", playerUrl, color);
                                     ImGui.SameLine();
                                     ImGui.TextDisabled($"[{entry.Score}]");
 
@@ -315,12 +364,17 @@ public class PriorityOverlayWindow : Window, IDisposable
 
                                             if (eligible is { Length: 1 })
                                             {
-                                                // Single option — log immediately
-                                                OnManualLog?.Invoke(entry.PlayerId, dropSlot, entry.PlayerName, eligible[0]);
+                                                // Single option — show confirmation with augment
+                                                _confirmAction = ConfirmAction.LogLoot;
+                                                _confirmPlayerId = entry.PlayerId;
+                                                _confirmSlot = dropSlot;
+                                                _confirmPlayerName = entry.PlayerName;
+                                                _confirmSlotAugmented = eligible[0];
+                                                _openConfirmPopup = true;
                                             }
                                             else if (eligible is { Length: > 1 })
                                             {
-                                                // Multiple options — show popup
+                                                // Multiple options — show material slot popup first
                                                 _pendingMaterialPlayerId = entry.PlayerId;
                                                 _pendingMaterialSlot = dropSlot;
                                                 _pendingMaterialPlayerName = entry.PlayerName;
@@ -329,14 +383,24 @@ public class PriorityOverlayWindow : Window, IDisposable
                                             }
                                             else
                                             {
-                                                // No eligible slots — log without augmentation
-                                                OnManualLog?.Invoke(entry.PlayerId, dropSlot, entry.PlayerName, null);
+                                                // No eligible slots — confirm without augmentation
+                                                _confirmAction = ConfirmAction.LogLoot;
+                                                _confirmPlayerId = entry.PlayerId;
+                                                _confirmSlot = dropSlot;
+                                                _confirmPlayerName = entry.PlayerName;
+                                                _confirmSlotAugmented = null;
+                                                _openConfirmPopup = true;
                                             }
                                         }
                                         else
                                         {
-                                            // Gear or universal_tomestone — no slot selection
-                                            OnManualLog?.Invoke(entry.PlayerId, dropSlot, entry.PlayerName, null);
+                                            // Gear or universal_tomestone — show confirmation
+                                            _confirmAction = ConfirmAction.LogLoot;
+                                            _confirmPlayerId = entry.PlayerId;
+                                            _confirmSlot = dropSlot;
+                                            _confirmPlayerName = entry.PlayerName;
+                                            _confirmSlotAugmented = null;
+                                            _openConfirmPopup = true;
                                         }
                                     }
                                     ImGui.PopID();
@@ -371,7 +435,13 @@ public class PriorityOverlayWindow : Window, IDisposable
                     var slot = _pendingMaterialEligibleSlots[i];
                     if (ImGui.Selectable(FormatDropName(slot)))
                     {
-                        OnManualLog?.Invoke(_pendingMaterialPlayerId, _pendingMaterialSlot, _pendingMaterialPlayerName, slot);
+                        // Route through confirmation popup
+                        _confirmAction = ConfirmAction.LogLoot;
+                        _confirmPlayerId = _pendingMaterialPlayerId;
+                        _confirmSlot = _pendingMaterialSlot;
+                        _confirmPlayerName = _pendingMaterialPlayerName;
+                        _confirmSlotAugmented = slot;
+                        _openConfirmPopup = true;
                         ImGui.CloseCurrentPopup();
                     }
                 }
@@ -380,6 +450,64 @@ public class PriorityOverlayWindow : Window, IDisposable
             ImGui.Separator();
             if (ImGui.Selectable("Cancel"))
             {
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        // Confirmation modal (centered, properly sized)
+        if (_openConfirmPopup)
+        {
+            ImGui.OpenPopup("Confirm Action###confirm_action");
+            _openConfirmPopup = false;
+        }
+
+        // Center the modal in the viewport
+        var viewport = ImGui.GetMainViewport();
+        ImGui.SetNextWindowPos(viewport.GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(340, 0));
+
+        if (ImGui.BeginPopupModal("Confirm Action###confirm_action", ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+        {
+            if (_confirmAction == ConfirmAction.LogLoot)
+            {
+                ImGui.TextColored(ColorAccent, $"Log {FormatDropName(_confirmSlot)} \u2192 {_confirmPlayerName}?");
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.TextWrapped($"This will record {_confirmPlayerName} received {FormatDropName(_confirmSlot)} from {_floorName}.");
+                if (_confirmSlotAugmented != null)
+                {
+                    ImGui.Spacing();
+                    ImGui.TextWrapped($"This will also mark {FormatDropName(_confirmSlotAugmented)} as augmented.");
+                }
+            }
+            else if (_confirmAction == ConfirmAction.ClearFloor)
+            {
+                ImGui.TextColored(ColorAccent, $"Mark {_floorName} as cleared?");
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.TextWrapped($"This will mark {_floorName} as cleared for all 8 players. Everyone will receive books for this week.");
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            if (ImGui.Button("Confirm", new Vector2(120, 0)))
+            {
+                if (_confirmAction == ConfirmAction.LogLoot)
+                    OnManualLog?.Invoke(_confirmPlayerId, _confirmSlot, _confirmPlayerName, _confirmSlotAugmented);
+                else if (_confirmAction == ConfirmAction.ClearFloor)
+                    OnMarkFloorCleared?.Invoke();
+
+                _confirmAction = ConfirmAction.None;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(120, 0)))
+            {
+                _confirmAction = ConfirmAction.None;
                 ImGui.CloseCurrentPopup();
             }
 
@@ -403,7 +531,8 @@ public class PriorityOverlayWindow : Window, IDisposable
         {
             if (ImGui.Button($"Mark {_floorName} Cleared"))
             {
-                OnMarkFloorCleared?.Invoke();
+                _confirmAction = ConfirmAction.ClearFloor;
+                _openConfirmPopup = true;
             }
         }
 
@@ -415,15 +544,35 @@ public class PriorityOverlayWindow : Window, IDisposable
             OnRefresh?.Invoke();
             ShowStatus("Refreshing priority data...", ColorAccent);
         }
+
+        // Ctrl+Click hint
+        if (!string.IsNullOrEmpty(_config.DefaultGroupShareCode))
+        {
+            ImGui.TextDisabled("Ctrl+Click names to open in browser");
+        }
     }
 
-    private static void DrawJobIcon(string jobAbbrev, Vector2 size, bool dimmed = false)
+    private void DrawJobIcon(string jobAbbrev, Vector2 size, bool dimmed = false)
     {
-        if (JobIconIds.TryGetValue(jobAbbrev.ToUpperInvariant(), out var jobId))
+        var key = jobAbbrev.ToUpperInvariant();
+        var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : new Vector4(1, 1, 1, 1);
+
+        // Try embedded icon first
+        if (_jobIcons.TryGetValue(key, out var embeddedTex) && embeddedTex != null)
         {
-            var iconId = 62100u + jobId; // Framed style icons
+            var wrap = embeddedTex.GetWrapOrDefault();
+            if (wrap != null)
+            {
+                ImGui.Image(wrap.Handle, size, new Vector2(0, 0), new Vector2(1, 1), tint);
+                return;
+            }
+        }
+
+        // Fallback to game icon
+        if (JobIconIds.TryGetValue(key, out var jobId))
+        {
+            var iconId = 62100u + jobId;
             var tex = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrEmpty();
-            var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : new Vector4(1, 1, 1, 1);
             ImGui.Image(tex.Handle, size, new Vector2(0, 0), new Vector2(1, 1), tint);
         }
         else
@@ -455,6 +604,49 @@ public class PriorityOverlayWindow : Window, IDisposable
             "tome_weapon" => "Tome Weapon",
             _ => char.ToUpper(drop[0]) + drop[1..],
         };
+    }
+
+    private string? BuildWebAppUrl(string? tab = null, int? floor = null, int? week = null, string? playerId = null)
+    {
+        var baseUrl = !string.IsNullOrEmpty(_config.FrontendBaseUrl)
+            ? _config.FrontendBaseUrl.TrimEnd('/')
+            : _config.ApiBaseUrl.TrimEnd('/');
+        var shareCode = _config.DefaultGroupShareCode;
+        var tierId = _config.DefaultTierId;
+
+        if (string.IsNullOrEmpty(shareCode) || string.IsNullOrEmpty(tierId))
+            return null;
+
+        var url = $"{baseUrl}/group/{shareCode}?tier={tierId}";
+        if (tab != null) url += $"&tab={tab}";
+        if (floor != null) url += $"&floor={floor}";
+        if (week != null) url += $"&week={week}";
+        if (playerId != null) url += $"&player={playerId}";
+        return url;
+    }
+
+    private static bool DrawLinkText(string label, string? url, Vector4 color)
+    {
+        if (url == null)
+        {
+            ImGui.TextColored(color, label);
+            return false;
+        }
+
+        ImGui.TextColored(color, label);
+        var clicked = false;
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+
+            var io = ImGui.GetIO();
+            if (io.KeyCtrl && ImGui.IsItemClicked(ImGuiMouseButton.Left))
+            {
+                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+                clicked = true;
+            }
+        }
+        return clicked;
     }
 
     public void Dispose() { }

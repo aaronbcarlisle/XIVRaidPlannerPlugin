@@ -84,9 +84,11 @@ public class RaidPlannerClient : IDisposable
 
     // ==================== Priority ====================
 
-    public async Task<PriorityResponse?> GetPriorityAsync(int? floor = null)
+    public async Task<PriorityResponse?> GetPriorityAsync(int? floor = null, string? groupId = null, string? tierId = null)
     {
-        var url = $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/priority";
+        var gid = groupId ?? _config.DefaultGroupId;
+        var tid = tierId ?? _config.DefaultTierId;
+        var url = $"/api/static-groups/{gid}/tiers/{tid}/priority";
         if (floor.HasValue)
             url += $"?floor={floor.Value}";
         return await GetAsync<PriorityResponse>(url);

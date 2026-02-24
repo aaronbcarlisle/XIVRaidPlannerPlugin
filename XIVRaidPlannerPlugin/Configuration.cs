@@ -16,6 +16,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Base URL of the FFXIV Raid Planner API (e.g., "https://xivraidplanner.app").</summary>
     public string ApiBaseUrl { get; set; } = "https://xivraidplanner.app";
 
+    /// <summary>Base URL of the web frontend (for Ctrl+Click links). Falls back to ApiBaseUrl if empty.</summary>
+    public string FrontendBaseUrl { get; set; } = string.Empty;
+
     /// <summary>API key (xrp_...) for authentication.</summary>
     public string ApiKey { get; set; } = string.Empty;
 
@@ -24,6 +27,9 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Display name of the selected static group (for overlay header).</summary>
     public string DefaultGroupName { get; set; } = string.Empty;
+
+    /// <summary>Share code of the selected static group (for web app links).</summary>
+    public string DefaultGroupShareCode { get; set; } = string.Empty;
 
     /// <summary>Selected tier UUID.</summary>
     public string DefaultTierId { get; set; } = string.Empty;
@@ -34,14 +40,20 @@ public class Configuration : IPluginConfiguration
     /// <summary>How loot logging should work.</summary>
     public AutoLogMode AutoLogMode { get; set; } = AutoLogMode.Confirm;
 
-    /// <summary>Whether to show the priority overlay in savage instances.</summary>
+    /// <summary>Whether to show the priority overlay in savage instances (master toggle).</summary>
     public bool ShowOverlay { get; set; } = true;
+
+    /// <summary>Show overlay when entering a raid instance.</summary>
+    public bool ShowOverlayOnEntry { get; set; } = true;
+
+    /// <summary>Show overlay when a duty completes (boss killed).</summary>
+    public bool ShowOverlayOnDutyComplete { get; set; } = false;
+
+    /// <summary>Show overlay when the loot window (Need/Greed) opens.</summary>
+    public bool ShowOverlayOnLootWindow { get; set; } = false;
 
     /// <summary>Warn if leaving an instance with unclaimed priority loot.</summary>
     public bool EnableLeaveWarning { get; set; } = true;
-
-    /// <summary>Scale factor for the overlay (0.5 - 2.0).</summary>
-    public float OverlayScale { get; set; } = 1.0f;
 
     /// <summary>
     /// Manual overrides for matching in-game character names to planner player IDs.
