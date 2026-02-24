@@ -132,6 +132,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         _currentFloorKey = $"floor{floor}";
         _currentFloor = floor;
         _floorName = floorName;
+        _loggedEntries.Clear();
         if (!string.IsNullOrEmpty(staticName))
             _staticName = staticName;
         if (!string.IsNullOrEmpty(tierName))
