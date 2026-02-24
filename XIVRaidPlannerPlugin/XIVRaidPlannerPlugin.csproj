@@ -8,6 +8,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Images\*.png" Exclude="Images\icon.png" />
     <EmbeddedResource Include="Images\jobs\*.png" />
+    <EmbeddedResource Include="Images\slots\*.png" />
     <None Include="Images\icon.png" CopyToOutputDirectory="PreserveNewest" Link="images\icon.png" />
   </ItemGroup>
 </Project>

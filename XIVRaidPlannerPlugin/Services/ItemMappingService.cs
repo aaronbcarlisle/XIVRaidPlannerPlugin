@@ -44,13 +44,26 @@ public class ItemMappingService
         _bisItemIds.Clear();
         _bisSlotToMateria.Clear();
 
+        var resolved = 0;
         foreach (var slot in gear)
         {
-            if (slot.ItemId is > 0)
+            uint? itemId = slot.ItemId is > 0 ? (uint)slot.ItemId.Value : null;
+
+            // Fallback: resolve by name if itemId is missing (legacy data imported before itemId preservation)
+            if (itemId == null && !string.IsNullOrEmpty(slot.ItemName))
             {
-                var itemId = (uint)slot.ItemId.Value;
-                _bisItemToSlot[itemId] = slot.Slot;
-                _bisItemIds.Add(itemId);
+                itemId = ResolveItemIdByName(slot.ItemName);
+                if (itemId != null)
+                {
+                    slot.ItemId = (int)itemId.Value;
+                    resolved++;
+                }
+            }
+
+            if (itemId != null)
+            {
+                _bisItemToSlot[itemId.Value] = slot.Slot;
+                _bisItemIds.Add(itemId.Value);
             }
 
             if (slot.Materia is { Count: > 0 })
@@ -59,6 +72,8 @@ public class ItemMappingService
             }
         }
 
+        if (resolved > 0)
+            _log.Info($"[ItemMapping] Resolved {resolved} items by name (legacy data)");
         _log.Info($"[ItemMapping] Loaded {_bisItemIds.Count} BiS items across {gear.Count} slots");
     }
 

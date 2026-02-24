@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Dalamud.Game.Addon.Lifecycle;
@@ -81,7 +82,7 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow = new PriorityOverlayWindow(Configuration);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
-        _bisViewerWindow = new BiSViewerWindow(_bisData, Configuration);
+        _bisViewerWindow = new BiSViewerWindow(_bisData, _inventoryService, Configuration);
 
         WindowSystem.AddWindow(_configWindow);
         WindowSystem.AddWindow(_overlayWindow);
@@ -98,6 +99,7 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnMarkFloorCleared += OnMarkFloorCleared;
         _overlayWindow.OnRefresh += OnRefreshRequested;
         _lootConfirmWindow.OnConfirm += OnLootConfirmed;
+        _bisViewerWindow.OnSyncRequested += SyncGear;
 
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -146,6 +148,7 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnMarkFloorCleared -= OnMarkFloorCleared;
         _overlayWindow.OnRefresh -= OnRefreshRequested;
         _lootConfirmWindow.OnConfirm -= OnLootConfirmed;
+        _bisViewerWindow.OnSyncRequested -= SyncGear;
 
         // Dispose windows
         WindowSystem.RemoveAllWindows();
@@ -229,36 +232,85 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        // Build the gear update
-        var updatedGear = _inventoryService.BuildGearUpdate(equipped, currentGear.Gear);
-
-        // Count changes
-        var changes = 0;
-        for (var i = 0; i < updatedGear.Count && i < currentGear.Gear.Count; i++)
-        {
-            if (updatedGear[i].CurrentSource != currentGear.Gear[i].CurrentSource ||
-                updatedGear[i].HasItem != currentGear.Gear[i].HasItem ||
-                updatedGear[i].IsAugmented != currentGear.Gear[i].IsAugmented)
-                changes++;
-        }
-
-        if (changes == 0)
-        {
-            ChatGui.Print("[XRP] Gear already up to date.");
-            return;
-        }
-
-        // Send update to API
+        // Re-fetch fresh gear data from API before comparing (web app might have changed)
+        var playerId = currentGear.PlayerId;
+        _bisData.InvalidatePlayer(playerId);
         Task.Run(async () =>
         {
+            // Fetch latest gear state from API (in case user reset progress on web app)
+            await _bisData.FetchPlayerGearAsync(playerId, isCurrentPlayer: true);
+            var freshGear = _bisData.CurrentPlayerGear;
+            if (freshGear == null)
+            {
+                ChatGui.PrintError("[XRP] Failed to fetch current gear state from API.");
+                return;
+            }
+
+            // Build the gear update comparing equipped items against FRESH API data
+            var updatedGear = _inventoryService.BuildGearUpdate(equipped, freshGear.Gear);
+
+            // Check tome weapon status
+            TomeWeaponInfo? tomeWeaponUpdate = null;
+            if (freshGear.TomeWeapon.Pursuing && equipped.TryGetValue("weapon", out var equippedWeapon))
+            {
+                var weaponSource = _inventoryService.ClassifySource(equippedWeapon.ItemId);
+                if (weaponSource is "tome" or "tome_up")
+                {
+                    tomeWeaponUpdate = new TomeWeaponInfo
+                    {
+                        Pursuing = true,
+                        HasItem = true,
+                        IsAugmented = weaponSource == "tome_up",
+                    };
+                    Log.Info($"[Sync] Detected tome weapon: source={weaponSource}, augmented={tomeWeaponUpdate.IsAugmented}");
+                }
+            }
+
+            // Count changes and track newly acquired BiS slots
+            var changes = 0;
+            var newlyAcquired = new List<string>();
+            for (var i = 0; i < updatedGear.Count && i < freshGear.Gear.Count; i++)
+            {
+                if (updatedGear[i].CurrentSource != freshGear.Gear[i].CurrentSource ||
+                    updatedGear[i].HasItem != freshGear.Gear[i].HasItem ||
+                    updatedGear[i].IsAugmented != freshGear.Gear[i].IsAugmented)
+                    changes++;
+
+                if (updatedGear[i].HasItem && !freshGear.Gear[i].HasItem)
+                    newlyAcquired.Add(updatedGear[i].Slot);
+            }
+
+            // Also count tome weapon as a change
+            if (tomeWeaponUpdate != null && !freshGear.TomeWeapon.HasItem)
+                changes++;
+
+            if (changes == 0)
+            {
+                ChatGui.Print("[XRP] Gear already up to date.");
+                return;
+            }
+
+            // Send update to API
             var success = await _apiClient.SyncPlayerGearAsync(
-                currentGear.PlayerId,
-                new SnapshotPlayerUpdateRequest { Gear = updatedGear });
+                freshGear.PlayerId,
+                new SnapshotPlayerUpdateRequest { Gear = updatedGear, TomeWeapon = tomeWeaponUpdate });
 
             if (success)
             {
                 ChatGui.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
-                _bisData.InvalidatePlayer(currentGear.PlayerId);
+                _bisData.InvalidatePlayer(freshGear.PlayerId);
+                _bisViewerWindow.InvalidateEquippedGear();
+
+                // Auto-log loot entries only when in a savage instance with reliable floor data
+                if (newlyAcquired.Count > 0 && _cachedPriority != null && _territoryService.CurrentFloor != null)
+                {
+                    try { await LogNewAcquisitionsAsync(freshGear.PlayerId, newlyAcquired); }
+                    catch (System.Exception ex) { Log.Warning($"Loot logging failed (non-critical): {ex.Message}"); }
+                }
+                else if (newlyAcquired.Count > 0)
+                {
+                    ChatGui.Print($"[XRP] {newlyAcquired.Count} new BiS item(s) detected. Enter a savage instance to auto-log.");
+                }
 
                 // Re-fetch to update the BiS viewer
                 var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
@@ -745,6 +797,63 @@ public sealed class Plugin : IDalamudPlugin
                 _overlayWindow.ShowStatus("Priority data refreshed", new System.Numerics.Vector4(0.133f, 0.773f, 0.369f, 1f));
             }
         });
+    }
+
+    /// <summary>Log loot entries for newly acquired BiS items detected during gear sync.</summary>
+    private async Task LogNewAcquisitionsAsync(string playerId, List<string> slots)
+    {
+        try
+        {
+            var weekData = await _apiClient.GetCurrentWeekAsync();
+            var week = weekData?.CurrentWeek ?? 1;
+            var slotToFloor = BuildSlotToFloorMapping();
+            var logged = 0;
+
+            foreach (var slot in slots)
+            {
+                var floor = slotToFloor.GetValueOrDefault(slot,
+                    _territoryService.CurrentFloorName ?? "M9S");
+                var logSuccess = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
+                {
+                    WeekNumber = week,
+                    Floor = floor,
+                    ItemSlot = slot,
+                    RecipientPlayerId = playerId,
+                    Method = "purchase",
+                    Notes = "Synced via Dalamud plugin",
+                    MarkAcquired = true,
+                });
+                if (logSuccess) logged++;
+            }
+
+            if (logged > 0)
+                ChatGui.Print($"[XRP] Logged {logged} gear acquisition(s).");
+        }
+        catch (System.Exception ex)
+        {
+            Log.Warning($"Failed to log acquisitions: {ex.Message}");
+        }
+    }
+
+    /// <summary>Build a mapping of gear slot → floor name from cached priority data.</summary>
+    private Dictionary<string, string> BuildSlotToFloorMapping()
+    {
+        var mapping = new Dictionary<string, string>();
+        if (_cachedPriority == null) return mapping;
+
+        for (var f = 0; f < _cachedPriority.TierFloors.Count; f++)
+        {
+            var floorKey = $"floor{f + 1}";
+            if (_cachedPriority.Priority.TryGetValue(floorKey, out var floorData))
+            {
+                foreach (var slotKey in floorData.Keys)
+                {
+                    // Use highest floor (later floors override) since BiS drops from later floors
+                    mapping[slotKey] = _cachedPriority.TierFloors[f];
+                }
+            }
+        }
+        return mapping;
     }
 
     private async Task RefreshPriority()

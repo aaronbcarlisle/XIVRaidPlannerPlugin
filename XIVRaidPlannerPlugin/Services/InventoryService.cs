@@ -18,24 +18,23 @@ public class InventoryService
     private readonly IPluginLog _log;
 
     // Equipment slot indices → gear slot names
+    // The EquippedItems container retains the legacy waist slot at index 5 (always empty).
     // See: https://github.com/aers/FFXIVClientStructs/blob/main/FFXIVClientStructs/FFXIV/Client/Game/InventoryItem.cs
     private static readonly Dictionary<int, string> EquipSlotToGearSlot = new()
     {
-        [0] = "weapon",    // Main Hand
-        // [1] = "offhand", // Off Hand (not tracked in planner)
+        [0] = "weapon",      // Main Hand
+        // [1] = "offhand",  // Off Hand (not tracked in planner)
         [2] = "head",
         [3] = "body",
         [4] = "hands",
-        [5] = "legs",      // Waist was removed, legs is slot 5 now in equipped
-        [6] = "feet",
-        // Slot indices 7-8 are waist/legs in some older references
-        // In EquippedItems: 0=weapon, 1=offhand, 2=head, 3=body, 4=hands, 5=legs, 6=feet,
-        //                   7=earring, 8=necklace, 9=bracelet, 10=ring1, 11=ring2
-        [7] = "earring",
-        [8] = "necklace",
-        [9] = "bracelet",
-        [10] = "ring1",
-        [11] = "ring2",
+        // [5] = waist       // Legacy slot, always empty since 5.0 — do NOT map
+        [6] = "legs",
+        [7] = "feet",
+        [8] = "earring",
+        [9] = "necklace",
+        [10] = "bracelet",
+        [11] = "ring1",
+        [12] = "ring2",
     };
 
     // Item level ranges for source classification (Dawntrail Savage tier)
@@ -87,10 +86,28 @@ public class InventoryService
                 if (!EquipSlotToGearSlot.TryGetValue(i, out var slotName))
                     continue;
 
+                // Read materia from the inventory item (uses accessor methods)
+                var matCount = 0;
+                var matTypes = new ushort[5];
+                var matGrades = new byte[5];
+                try
+                {
+                    matCount = item->GetMateriaCount();
+                    for (var m = 0; m < matCount && m < 5; m++)
+                    {
+                        matTypes[m] = item->GetMateriaId((byte)m);
+                        matGrades[m] = item->GetMateriaGrade((byte)m);
+                    }
+                }
+                catch { /* materia reading optional */ }
+
                 result[slotName] = new EquippedItem
                 {
                     ItemId = item->ItemId,
                     IsHq = item->Flags.HasFlag(InventoryItem.ItemFlags.HighQuality),
+                    MateriaTypes = matTypes,
+                    MateriaGrades = matGrades,
+                    MateriaCount = matCount,
                 };
             }
 
@@ -102,6 +119,116 @@ public class InventoryService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Read equipped gear and enrich with Lumina data (name, level, icon) for display.
+    /// MUST be called on the framework/main thread.
+    /// </summary>
+    public Dictionary<string, EquippedItemDetails> ReadEquippedGearEnriched()
+    {
+        var raw = ReadEquippedGear();
+        var result = new Dictionary<string, EquippedItemDetails>();
+
+        var itemSheet = _dataManager.GetExcelSheet<Item>();
+        if (itemSheet == null) return result;
+
+        foreach (var (slot, equipped) in raw)
+        {
+            var item = itemSheet.GetRowOrDefault(equipped.ItemId);
+            if (item == null) continue;
+
+            var details = new EquippedItemDetails
+            {
+                ItemId = equipped.ItemId,
+                ItemName = item.Value.Name.ToString(),
+                ItemLevel = (int)item.Value.LevelItem.RowId,
+                IconId = (uint)item.Value.Icon,
+                Source = ClassifySource(equipped.ItemId),
+            };
+
+            // Resolve equipped materia
+            if (equipped.MateriaCount > 0)
+                details.Materia = ResolveMateriaDetails(equipped, itemSheet);
+
+            result[slot] = details;
+        }
+
+        _log.Info($"[Inventory] Enriched {result.Count} equipped items with Lumina data");
+        return result;
+    }
+
+    /// <summary>Resolve materia type+grade to item details via Lumina.</summary>
+    private List<MateriaDetail> ResolveMateriaDetails(EquippedItem equipped, Lumina.Excel.ExcelSheet<Item> itemSheet)
+    {
+        var list = new List<MateriaDetail>();
+
+        try
+        {
+            var materiaSheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Materia>();
+            if (materiaSheet == null) return list;
+
+            for (var m = 0; m < equipped.MateriaCount; m++)
+            {
+                try
+                {
+                    var matRow = materiaSheet.GetRowOrDefault(equipped.MateriaTypes[m]);
+                    if (matRow == null) continue;
+
+                    var grade = equipped.MateriaGrades[m];
+
+                    // Get the materia item for this grade via the Item collection
+                    var materiaItemRef = matRow.Value.Item[grade];
+                    var materiaItemId = materiaItemRef.RowId;
+                    if (materiaItemId == 0) continue;
+
+                    var materiaItem = itemSheet.GetRowOrDefault(materiaItemId);
+                    if (materiaItem == null) continue;
+
+                    var name = materiaItem.Value.Name.ToString();
+
+                    // Get full stat name and value from Materia sheet
+                    var fullStatName = "";
+                    var statValue = 0;
+                    try
+                    {
+                        fullStatName = matRow.Value.BaseParam.Value.Name.ToString();
+                        statValue = matRow.Value.Value[grade];
+                    }
+                    catch { /* optional fields */ }
+
+                    list.Add(new MateriaDetail
+                    {
+                        Name = name,
+                        IconId = (uint)materiaItem.Value.Icon,
+                        Stat = AbbreviateStat(name),
+                        FullStatName = fullStatName,
+                        StatValue = statValue,
+                    });
+                }
+                catch { /* skip individual materia on error */ }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Debug($"[Inventory] Materia resolution failed: {ex.Message}");
+        }
+
+        return list;
+    }
+
+    /// <summary>Extract stat abbreviation from materia item name.</summary>
+    private static string AbbreviateStat(string materiaName)
+    {
+        var lower = materiaName.ToLowerInvariant();
+        if (lower.Contains("savage might") || lower.Contains("critical")) return "CRT";
+        if (lower.Contains("savage aim") || lower.Contains("direct hit")) return "DH";
+        if (lower.Contains("heavens' eye") || lower.Contains("determination")) return "DET";
+        if (lower.Contains("quickarm") || lower.Contains("skill speed")) return "SKS";
+        if (lower.Contains("quicktongue") || lower.Contains("spell speed")) return "SPS";
+        if (lower.Contains("battledance") || lower.Contains("tenacity")) return "TEN";
+        if (lower.Contains("piety")) return "PIE";
+        return materiaName.Length > 5 ? materiaName[..3].ToUpper() : materiaName.ToUpper();
     }
 
     /// <summary>
@@ -246,4 +373,28 @@ public class EquippedItem
 {
     public uint ItemId { get; set; }
     public bool IsHq { get; set; }
+    public ushort[] MateriaTypes { get; set; } = Array.Empty<ushort>();
+    public byte[] MateriaGrades { get; set; } = Array.Empty<byte>();
+    public int MateriaCount { get; set; }
+}
+
+/// <summary>Equipped item enriched with Lumina data for display.</summary>
+public class EquippedItemDetails
+{
+    public uint ItemId { get; set; }
+    public string ItemName { get; set; } = string.Empty;
+    public int ItemLevel { get; set; }
+    public uint IconId { get; set; }
+    public string Source { get; set; } = "unknown";
+    public List<MateriaDetail> Materia { get; set; } = new();
+}
+
+/// <summary>Resolved materia info for tooltip display.</summary>
+public class MateriaDetail
+{
+    public string Name { get; set; } = string.Empty;
+    public uint IconId { get; set; }
+    public string Stat { get; set; } = string.Empty;
+    public string FullStatName { get; set; } = string.Empty;
+    public int StatValue { get; set; }
 }
