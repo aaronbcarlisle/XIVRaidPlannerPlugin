@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Reflection;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
@@ -33,6 +34,16 @@ public class PriorityOverlayWindow : Window, IDisposable
         ["BRD"] = 23, ["MCH"] = 31, ["DNC"] = 38,
         ["BLM"] = 25, ["SMN"] = 27, ["RDM"] = 35, ["PCT"] = 42,
     };
+
+    // Gear slot icon names (loaded from embedded resources)
+    private static readonly HashSet<string> SlotIconNames = new()
+    {
+        "weapon", "head", "body", "hands", "legs", "feet",
+        "earring", "necklace", "bracelet", "ring",
+    };
+
+    // Cached slot icon textures (loaded from embedded PNGs)
+    private readonly Dictionary<string, ISharedImmediateTexture?> _slotIcons = new();
 
     private static readonly Vector4 ColorAccent = new(0.298f, 0.722f, 0.659f, 1f);
     private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);
@@ -87,6 +98,14 @@ public class PriorityOverlayWindow : Window, IDisposable
 
         // Mostly opaque background for readability
         BgAlpha = 0.95f;
+
+        // Load gear slot icons from embedded resources
+        var assembly = Assembly.GetExecutingAssembly();
+        foreach (var name in SlotIconNames)
+        {
+            var resourceName = $"XIVRaidPlannerPlugin.Images.{name}.png";
+            _slotIcons[name] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
+        }
     }
 
     public void SetPriorityData(PriorityResponse? data, int floor, string floorName, string staticName = "", string tierName = "")
@@ -187,12 +206,30 @@ public class PriorityOverlayWindow : Window, IDisposable
                     ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.SizingStretchSame |
                     ImGuiTableFlags.ScrollY | ImGuiTableFlags.BordersOuterH))
                 {
-                    // Column headers
+                    // Column setup (needed for sizing)
                     foreach (var drop in dropTypes)
                     {
                         ImGui.TableSetupColumn(FormatDropName(drop));
                     }
-                    ImGui.TableHeadersRow();
+
+                    // Custom header row with slot icons
+                    ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
+                    for (var col = 0; col < dropTypes.Count; col++)
+                    {
+                        ImGui.TableSetColumnIndex(col);
+                        var drop = dropTypes[col];
+                        var iconKey = drop is "ring1" or "ring2" ? "ring" : drop;
+                        if (_slotIcons.TryGetValue(iconKey, out var slotTex) && slotTex != null)
+                        {
+                            var wrap = slotTex.GetWrapOrDefault();
+                            if (wrap != null)
+                            {
+                                ImGui.Image(wrap.Handle, new Vector2(18, 18));
+                                ImGui.SameLine();
+                            }
+                        }
+                        ImGui.TableHeader(FormatDropName(drop));
+                    }
 
                     // Find max row count across all columns
                     var maxRows = 0;

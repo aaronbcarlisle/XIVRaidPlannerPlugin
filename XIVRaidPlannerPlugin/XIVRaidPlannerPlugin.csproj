@@ -5,4 +5,7 @@
     <PackageProjectUrl>https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin</PackageProjectUrl>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Images\*.png" />
+  </ItemGroup>
 </Project>
