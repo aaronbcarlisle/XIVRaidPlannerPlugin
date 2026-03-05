@@ -59,13 +59,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     // Cached job icon textures (loaded from embedded PNGs)
     private readonly Dictionary<string, ISharedImmediateTexture?> _jobIcons = new();
 
-    // Material type -> eligible augmentation slots
-    private static readonly Dictionary<string, string[]> MaterialSlotOptions = new()
-    {
-        ["twine"] = new[] { "head", "body", "hands", "legs", "feet" },
-        ["glaze"] = new[] { "earring", "necklace", "bracelet", "ring1", "ring2" },
-        ["solvent"] = new[] { "weapon" },
-    };
+    private static Dictionary<string, string[]> MaterialSlotOptions => GameConstants.MaterialSlotOptions;
 
     private static readonly Vector4 ColorAccent = new(0.298f, 0.722f, 0.659f, 1f);
     private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);

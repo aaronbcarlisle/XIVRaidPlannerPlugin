@@ -13,13 +13,7 @@ namespace XIVRaidPlannerPlugin.Windows;
 /// </summary>
 public class LootConfirmationWindow : Window, IDisposable
 {
-    // Material type -> eligible augmentation slots
-    private static readonly Dictionary<string, string[]> MaterialSlotOptions = new()
-    {
-        ["twine"] = new[] { "head", "body", "hands", "legs", "feet" },
-        ["glaze"] = new[] { "earring", "necklace", "bracelet", "ring1", "ring2" },
-        ["solvent"] = new[] { "weapon" },
-    };
+    private static Dictionary<string, string[]> MaterialSlotOptions => GameConstants.MaterialSlotOptions;
 
     private LootEvent? _pendingLoot;
     private string _resolvedPlayerName = "";

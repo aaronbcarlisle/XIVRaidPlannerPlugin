@@ -699,15 +699,21 @@ public sealed class Plugin : IDalamudPlugin
                 if (success)
                 {
                     Log.Information($"Manual log success: {slot} -> {playerName}");
-                    ChatGui.Print($"[XRP] Logged {slot} -> {playerName}");
-                    _overlayWindow.MarkAsLogged(playerId, slot, playerName);
+                    Framework.RunOnFrameworkThread(() =>
+                    {
+                        ChatGui.Print($"[XRP] Logged {slot} -> {playerName}");
+                        _overlayWindow.MarkAsLogged(playerId, slot, playerName);
+                    });
                     await RefreshPriority();
                 }
                 else
                 {
                     Log.Error($"Manual log failed: {slot} -> {playerName}");
-                    ChatGui.PrintError($"[XRP] Failed to log {slot} -> {playerName}");
-                    _overlayWindow.MarkLogFailed(slot, playerName);
+                    Framework.RunOnFrameworkThread(() =>
+                    {
+                        ChatGui.PrintError($"[XRP] Failed to log {slot} -> {playerName}");
+                        _overlayWindow.MarkLogFailed(slot, playerName);
+                    });
                 }
             }
             catch (System.Exception ex)
@@ -741,7 +747,7 @@ public sealed class Plugin : IDalamudPlugin
                 RecipientPlayerId = playerId,
                 Method = "drop",
                 Notes = "Logged via Dalamud plugin",
-                MarkAugmented = slotAugmented != null || materialType == "universal_tomestone",
+                MarkAugmented = slotAugmented != null,
                 SlotAugmented = slotAugmented,
             });
         }
@@ -785,7 +791,7 @@ public sealed class Plugin : IDalamudPlugin
 
             if (success)
             {
-                _overlayWindow.MarkFloorCleared();
+                Framework.RunOnFrameworkThread(() => _overlayWindow.MarkFloorCleared());
                 Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
             }
         });
