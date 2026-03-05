@@ -146,9 +146,12 @@ public class PriorityOverlayWindow : Window, IDisposable
         _currentFloorKey = $"floor{floor}";
         _currentFloor = floor;
         _floorName = floorName;
-        // Only clear logged entries when the floor changes, not on priority refresh
+        // Reset per-floor state when the floor changes, not on priority refresh
         if (floorChanged)
+        {
             _loggedEntries.Clear();
+            _floorCleared = false;
+        }
         if (!string.IsNullOrEmpty(staticName))
             _staticName = staticName;
         if (!string.IsNullOrEmpty(tierName))

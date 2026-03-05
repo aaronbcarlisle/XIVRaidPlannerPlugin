@@ -100,7 +100,7 @@ public class BiSDataService
     public async Task FetchPlayerGearAsync(string playerId, bool isCurrentPlayer = false)
     {
         if (IsFetching && !isCurrentPlayer) return;
-        if (!isCurrentPlayer) IsFetching = true;
+        IsFetching = true;
         LastError = null;
 
         try
@@ -146,7 +146,7 @@ public class BiSDataService
         }
         finally
         {
-            if (!isCurrentPlayer) IsFetching = false;
+            IsFetching = false;
         }
     }
 

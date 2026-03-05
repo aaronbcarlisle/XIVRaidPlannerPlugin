@@ -201,8 +201,8 @@ public sealed class Plugin : IDalamudPlugin
         if (!_bisViewerWindow.IsOpen)
         {
             // Fetch gear data if not already loaded
-            var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
-            if (charName != null && _bisData.CurrentPlayerGear == null)
+            var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+            if (!string.IsNullOrEmpty(charName) && _bisData.CurrentPlayerGear == null)
             {
                 Task.Run(async () => await _bisData.FetchCurrentPlayerGearAsync(charName));
             }
@@ -226,7 +226,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ChatGui.Print("[XRP] Syncing equipped gear...");
 
-        // Read equipped items (must happen on framework thread, which we're already on from command handler)
+        // Read equipped items — safe: called from command handler or Draw() button, both on framework thread
         var equipped = _inventoryService.ReadEquippedGear();
         if (equipped.Count == 0)
         {
@@ -322,8 +322,8 @@ public sealed class Plugin : IDalamudPlugin
                 }
 
                 // Re-fetch to update the BiS viewer
-                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
-                if (charName != null)
+                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+                if (!string.IsNullOrEmpty(charName))
                     await _bisData.FetchCurrentPlayerGearAsync(charName);
             }
             else
@@ -403,8 +403,8 @@ public sealed class Plugin : IDalamudPlugin
                     Log.Warning($"Failed to fetch user role: {ex.Message}");
                 }
 
-                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
-                if (charName != null)
+                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+                if (!string.IsNullOrEmpty(charName))
                 {
                     await _bisData.FetchCurrentPlayerGearAsync(charName);
 
@@ -445,7 +445,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         // Find the current player's planner ID from their character name
-        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
         Log.Information($"Player: loaded={PlayerState.IsLoaded}, name={charName ?? "null"}");
         if (string.IsNullOrEmpty(charName))
             return;
@@ -582,7 +582,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         // Find current player's planner ID
-        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
+        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
         if (string.IsNullOrEmpty(charName))
             return;
 
