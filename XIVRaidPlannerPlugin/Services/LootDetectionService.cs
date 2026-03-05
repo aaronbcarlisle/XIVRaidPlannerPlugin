@@ -47,10 +47,10 @@ public class LootDetectionService : IDisposable
 
     private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
     {
-        // System messages for loot distribution and purchases
-        // XivChatType 2105 = LootNotice (item obtained)
-        // XivChatType 62 = SystemMessage
-        // XivChatType 57 = SystemMessage (purchase/exchange)
+        // Chat types for loot/purchase detection:
+        //   2105 = LootNotice ("X obtains Y")
+        //   SystemMessage (enum) = general system messages
+        //   57 = SystemMessage variant used for purchase/exchange confirmations
         if (type != (XivChatType)2105 && type != XivChatType.SystemMessage && type != (XivChatType)57)
             return;
 

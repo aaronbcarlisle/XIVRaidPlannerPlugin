@@ -83,17 +83,22 @@ public class ConfigWindow : Window, IDisposable
             Task.Run(async () =>
             {
                 var result = await _apiClient.TestConnectionAsync();
-                if (result != null)
+                var groups = result != null ? await _apiClient.GetStaticGroupsAsync() : null;
+                // Marshal UI state updates back to the framework thread
+                Plugin.Framework.RunOnFrameworkThread(() =>
                 {
-                    _connectionStatus = $"Connected (API v{result.Version})";
-                    _connectionStatusColor = new Vector4(0, 1, 0, 1);
-                    _staticGroups = await _apiClient.GetStaticGroupsAsync();
-                }
-                else
-                {
-                    _connectionStatus = "";
-                }
-                _isTesting = false;
+                    if (result != null)
+                    {
+                        _connectionStatus = $"Connected (API v{result.Version})";
+                        _connectionStatusColor = new Vector4(0, 1, 0, 1);
+                        _staticGroups = groups;
+                    }
+                    else
+                    {
+                        _connectionStatus = "";
+                    }
+                    _isTesting = false;
+                });
             });
         }
 
@@ -171,20 +176,22 @@ public class ConfigWindow : Window, IDisposable
                 Task.Run(async () =>
                 {
                     var result = await _apiClient.TestConnectionAsync();
-                    if (result != null)
+                    var groups = result != null ? await _apiClient.GetStaticGroupsAsync() : null;
+                    Plugin.Framework.RunOnFrameworkThread(() =>
                     {
-                        _connectionStatus = $"Connected (API v{result.Version})";
-                        _connectionStatusColor = new Vector4(0, 1, 0, 1);
-
-                        // Also fetch statics on successful connection
-                        _staticGroups = await _apiClient.GetStaticGroupsAsync();
-                    }
-                    else
-                    {
-                        _connectionStatus = "Connection failed. Check URL and API key.";
-                        _connectionStatusColor = new Vector4(1, 0, 0, 1);
-                    }
-                    _isTesting = false;
+                        if (result != null)
+                        {
+                            _connectionStatus = $"Connected (API v{result.Version})";
+                            _connectionStatusColor = new Vector4(0, 1, 0, 1);
+                            _staticGroups = groups;
+                        }
+                        else
+                        {
+                            _connectionStatus = "Connection failed. Check URL and API key.";
+                            _connectionStatusColor = new Vector4(1, 0, 0, 1);
+                        }
+                        _isTesting = false;
+                    });
                 });
             }
         }
@@ -266,8 +273,12 @@ public class ConfigWindow : Window, IDisposable
             var groupId = _config.DefaultGroupId;
             Task.Run(async () =>
             {
-                _tiers = await _apiClient.GetTiersAsync(groupId);
-                _isFetchingTiers = false;
+                var tiers = await _apiClient.GetTiersAsync(groupId);
+                Plugin.Framework.RunOnFrameworkThread(() =>
+                {
+                    _tiers = tiers;
+                    _isFetchingTiers = false;
+                });
             });
         }
 
@@ -359,9 +370,12 @@ public class ConfigWindow : Window, IDisposable
                     Task.Run(async () =>
                     {
                         var priority = await _apiClient.GetPriorityAsync();
-                        if (priority != null)
-                            _staticPlayers = priority.Players;
-                        _isFetchingRoster = false;
+                        Plugin.Framework.RunOnFrameworkThread(() =>
+                        {
+                            if (priority != null)
+                                _staticPlayers = priority.Players;
+                            _isFetchingRoster = false;
+                        });
                     });
                 }
                 ImGui.SameLine();
@@ -483,9 +497,12 @@ public class ConfigWindow : Window, IDisposable
             Task.Run(async () =>
             {
                 var priority = await _apiClient.GetPriorityAsync();
-                if (priority != null)
-                    _staticPlayers = priority.Players;
-                _isFetchingRoster = false;
+                Plugin.Framework.RunOnFrameworkThread(() =>
+                {
+                    if (priority != null)
+                        _staticPlayers = priority.Players;
+                    _isFetchingRoster = false;
+                });
             });
         }
     }

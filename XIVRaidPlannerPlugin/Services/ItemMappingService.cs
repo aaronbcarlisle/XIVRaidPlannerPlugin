@@ -131,10 +131,11 @@ public class ItemMappingService
                 return;
             }
 
-            // Only index equipment items (iLv >= 640 to limit scope to recent tiers)
+            // Only index equipment items at or above minimum relevant iLv (limits scope to recent tiers)
+            const uint minItemLevel = 640; // Dawntrail 7.x baseline
             foreach (var item in itemSheet)
             {
-                if (item.LevelItem.RowId >= 640 && item.EquipSlotCategory.RowId > 0)
+                if (item.LevelItem.RowId >= minItemLevel && item.EquipSlotCategory.RowId > 0)
                 {
                     var name = item.Name.ToString().ToLowerInvariant();
                     if (!string.IsNullOrEmpty(name))

@@ -58,7 +58,12 @@ public class LeaveWarningService
             // Also check if ANY player has been manually logged for this drop type
             if (!isDistributed && manuallyLoggedEntries != null)
             {
-                isDistributed = manuallyLoggedEntries.Any(e => e.EndsWith($"|{dropType}"));
+                // Handle ring: dropType "ring" should match logged "ring1" or "ring2"
+                if (dropType == "ring")
+                    isDistributed = manuallyLoggedEntries.Any(e =>
+                        e.EndsWith("|ring") || e.EndsWith("|ring1") || e.EndsWith("|ring2"));
+                else
+                    isDistributed = manuallyLoggedEntries.Any(e => e.EndsWith($"|{dropType}"));
             }
 
             if (isDistributed) continue;

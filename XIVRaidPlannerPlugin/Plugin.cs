@@ -33,6 +33,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static IFramework Framework { get; private set; } = null!;
 
     private const string CommandName = "/xrp";
 
@@ -242,7 +243,7 @@ public sealed class Plugin : IDalamudPlugin
             var freshGear = _bisData.CurrentPlayerGear;
             if (freshGear == null)
             {
-                ChatGui.PrintError("[XRP] Failed to fetch current gear state from API.");
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError("[XRP] Failed to fetch current gear state from API."));
                 return;
             }
 
@@ -288,7 +289,7 @@ public sealed class Plugin : IDalamudPlugin
 
             if (changes == 0)
             {
-                ChatGui.Print("[XRP] Gear already up to date.");
+                Framework.RunOnFrameworkThread(() => ChatGui.Print("[XRP] Gear already up to date."));
                 return;
             }
 
@@ -299,9 +300,13 @@ public sealed class Plugin : IDalamudPlugin
 
             if (success)
             {
-                ChatGui.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
-                _bisData.InvalidatePlayer(freshGear.PlayerId);
-                _bisViewerWindow.InvalidateEquippedGear();
+                // Marshal UI/service updates back to the framework thread
+                Framework.RunOnFrameworkThread(() =>
+                {
+                    ChatGui.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
+                    _bisData.InvalidatePlayer(freshGear.PlayerId);
+                    _bisViewerWindow.InvalidateEquippedGear();
+                });
 
                 // Auto-log loot entries only when in a savage instance with reliable floor data
                 if (newlyAcquired.Count > 0 && _cachedPriority != null && _territoryService.CurrentFloor != null)
@@ -311,7 +316,8 @@ public sealed class Plugin : IDalamudPlugin
                 }
                 else if (newlyAcquired.Count > 0)
                 {
-                    ChatGui.Print($"[XRP] {newlyAcquired.Count} new BiS item(s) detected. Enter a savage instance to auto-log.");
+                    Framework.RunOnFrameworkThread(() =>
+                        ChatGui.Print($"[XRP] {newlyAcquired.Count} new BiS item(s) detected. Enter a savage instance to auto-log."));
                 }
 
                 // Re-fetch to update the BiS viewer
@@ -321,7 +327,7 @@ public sealed class Plugin : IDalamudPlugin
             }
             else
             {
-                ChatGui.PrintError("[XRP] Failed to sync gear. Check connection.");
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError("[XRP] Failed to sync gear. Check connection."));
             }
         });
     }

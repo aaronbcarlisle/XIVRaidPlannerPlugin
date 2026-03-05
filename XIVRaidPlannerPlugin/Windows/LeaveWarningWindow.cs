@@ -31,7 +31,9 @@ public class LeaveWarningWindow : Window, IDisposable
             ImGuiWindowFlags.NoSavedSettings |
             ImGuiWindowFlags.NoMove |
             ImGuiWindowFlags.NoTitleBar |
-            ImGuiWindowFlags.NoScrollbar)
+            ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoFocusOnAppearing |
+            ImGuiWindowFlags.NoNav)
     {
         _leaveWarning = leaveWarning;
         _gameGui = gameGui;
@@ -83,8 +85,6 @@ public class LeaveWarningWindow : Window, IDisposable
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 8f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16, 12));
         _stylesPushed = true;
-
-        ImGui.SetNextWindowFocus();
     }
 
     public override void PostDraw()

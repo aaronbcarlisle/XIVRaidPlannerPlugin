@@ -163,11 +163,14 @@ public class PriorityOverlayWindow : Window, IDisposable
 
     public void SetPriorityData(PriorityResponse? data, int floor, string floorName, string staticName = "", string tierName = "")
     {
+        var floorChanged = _currentFloor != floor;
         _priorityData = data;
         _currentFloorKey = $"floor{floor}";
         _currentFloor = floor;
         _floorName = floorName;
-        _loggedEntries.Clear();
+        // Only clear logged entries when the floor changes, not on priority refresh
+        if (floorChanged)
+            _loggedEntries.Clear();
         if (!string.IsNullOrEmpty(staticName))
             _staticName = staticName;
         if (!string.IsNullOrEmpty(tierName))

@@ -37,8 +37,8 @@ public class InventoryService
         [12] = "ring2",
     };
 
-    // Item level ranges for source classification (Dawntrail Savage tier)
-    // These will need updating each major patch cycle
+    // Item level ranges for source classification (Dawntrail 7.2 — AAC Heavyweight Savage)
+    // Update these constants each major patch cycle
     private const int IL_SAVAGE = 795;
     private const int IL_SAVAGE_ARMOR = 790;  // Savage armor/accessories
     private const int IL_TOME_AUG = 790;      // Augmented tomestone
@@ -99,7 +99,7 @@ public class InventoryService
                         matGrades[m] = item->GetMateriaGrade((byte)m);
                     }
                 }
-                catch { /* materia reading optional */ }
+                catch (Exception ex) { _log.Debug($"[Inventory] Materia read failed for slot {i}: {ex.Message}"); }
 
                 result[slotName] = new EquippedItem
                 {
@@ -208,7 +208,7 @@ public class InventoryService
                         fullStatName = matRow.Value.BaseParam.Value.Name.ToString();
                         statValue = matRow.Value.Value[grade];
                     }
-                    catch { /* optional fields */ }
+                    catch (Exception ex) { _log.Debug($"[Inventory] Stat resolution failed: {ex.Message}"); }
 
                     list.Add(new MateriaDetail
                     {
@@ -219,7 +219,7 @@ public class InventoryService
                         StatValue = statValue,
                     });
                 }
-                catch { /* skip individual materia on error */ }
+                catch (Exception ex) { _log.Debug($"[Inventory] Materia resolution failed for index {m}: {ex.Message}"); }
             }
         }
         catch (Exception ex)
@@ -286,7 +286,7 @@ public class InventoryService
             if (lowerName.StartsWith("aug") || lowerName.Contains("augmented"))
                 return "tome_up";
 
-            // Current tier savage patterns
+            // Current tier savage patterns (Dawntrail 7.2 — AAC Heavyweight Savage)
             if (lowerName.Contains("ascension") || lowerName.Contains("cruiserweight") ||
                 lowerName.Contains("grand champion") || lowerName.Contains("heavyweight"))
                 return "savage";
@@ -301,7 +301,7 @@ public class InventoryService
         // Catch-up gear (alliance raid, iLv 780+)
         if (iLv >= IL_CATCHUP)
         {
-            // Unaugmented tome patterns
+            // Unaugmented tome patterns (7.2 tomestone gear names)
             if (lowerName.Contains("quetzalli") || lowerName.Contains("neo kingdom") ||
                 lowerName.Contains("bygone"))
                 return "tome";
@@ -312,6 +312,7 @@ public class InventoryService
         // Crafted gear (iLv ~770)
         if (iLv >= IL_CRAFTED)
         {
+            // Crafted gear patterns (7.2 crafted names)
             if (lowerName.Contains("claro") || lowerName.Contains("agonist") ||
                 lowerName.Contains("archeo kingdom"))
                 return "crafted";

@@ -11,6 +11,9 @@ jobs:
     name: Build Plugin
     runs-on: ubuntu-latest
 
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,12 +23,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Setup Dalamud
+      - name: Download Dalamud
         run: |
-          mkdir -p ~/.xlcore/dalamud/Hooks/dev
-          curl -sSL https://kamori.goats.dev/Dalamud/Release/Runtime -o /tmp/dalamud-runtime.zip
-          # Dalamud SDK resolves dependencies at build time; the SDK package handles this
-          # For CI, we just need .NET 8 and the SDK will download what it needs
+          mkdir -p $DALAMUD_HOME
+          curl -sSL https://goatcorp.github.io/dalamud-distrib/latest.zip -o /tmp/dalamud.zip
+          unzip -o /tmp/dalamud.zip -d $DALAMUD_HOME
 
       - name: Restore dependencies
         run: dotnet restore
