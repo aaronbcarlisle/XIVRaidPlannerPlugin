@@ -61,6 +61,7 @@ public sealed class Plugin : IDalamudPlugin
 
     // Cached priority data
     private PriorityResponse? _cachedPriority;
+    private bool _autoDetectedTier;
 
     public Plugin()
     {
@@ -345,6 +346,7 @@ public sealed class Plugin : IDalamudPlugin
         Task.Run(async () =>
         {
             // Auto-detect active tier only if none is configured
+            // Set transiently on config (no Save) so API client sees it; cleared on instance exit
             if (!string.IsNullOrEmpty(Configuration.DefaultGroupId) && string.IsNullOrEmpty(Configuration.DefaultTierId))
             {
                 var tiers = await _apiClient.GetTiersAsync(Configuration.DefaultGroupId);
@@ -354,12 +356,13 @@ public sealed class Plugin : IDalamudPlugin
                     Log.Information($"Auto-detected active tier: {activeTier.TierId} ({activeTier.Id})");
                     Configuration.DefaultTierId = activeTier.Id;
                     Configuration.DefaultTierName = activeTier.TierId;
-                    Configuration.Save();
+                    _autoDetectedTier = true;
                 }
                 else
                 {
                     Log.Warning("No active tier found and no tier configured. Overlay will not show.");
-                    ChatGui.PrintError("[XRP] No active tier found. Select a tier in /xrp config.");
+                    Framework.RunOnFrameworkThread(() =>
+                        ChatGui.PrintError("[XRP] No active tier found. Select a tier in /xrp config."));
                     return;
                 }
             }
@@ -388,7 +391,18 @@ public sealed class Plugin : IDalamudPlugin
                 _bisData.AvailablePlayers = _cachedPriority.Players;
 
                 // Set user role from the static group info
-                // (already available from the API - StaticGroupInfo.UserRole)
+                try
+                {
+                    var groups = await _apiClient.GetStaticGroupsAsync();
+                    var group = groups.Find(g => g.Id == Configuration.DefaultGroupId);
+                    if (group?.UserRole != null)
+                        _bisData.UserRole = group.UserRole;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"Failed to fetch user role: {ex.Message}");
+                }
+
                 var charName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
                 if (charName != null)
                 {
@@ -409,6 +423,14 @@ public sealed class Plugin : IDalamudPlugin
         _leaveWarningWindow.IsOpen = false;
         _bisViewerWindow.IsOpen = false;
         _bisData.ClearCache();
+
+        // Clear auto-detected tier so it re-detects on next entry
+        if (_autoDetectedTier)
+        {
+            Configuration.DefaultTierId = string.Empty;
+            Configuration.DefaultTierName = string.Empty;
+            _autoDetectedTier = false;
+        }
     }
 
     // ==================== Leave Warning ====================

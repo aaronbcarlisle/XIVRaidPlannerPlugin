@@ -118,6 +118,7 @@ public class BiSViewerWindow : Window, IDisposable
         DrawPlayerHeader(gear);
         ImGui.Separator();
 
+        // Safe: Draw() runs on the framework thread (Dalamud's ImGui render cycle)
         if (_equippedGearStale && IsViewingSelf(gear))
         {
             try { _equippedGear = _inventoryService.ReadEquippedGearEnriched(); }
@@ -220,7 +221,7 @@ public class BiSViewerWindow : Window, IDisposable
 
             // Col 3: Source badge
             ImGui.TableNextColumn();
-            DrawSourceBadge(slot.BisSource);
+            DrawSourceBadge(slot.BisSource, slot.Slot);
 
             // Col 4: Status circle
             ImGui.TableNextColumn();
@@ -284,7 +285,7 @@ public class BiSViewerWindow : Window, IDisposable
         }
     }
 
-    private void DrawSourceBadge(string? bisSource)
+    private void DrawSourceBadge(string? bisSource, string slotKey = "")
     {
         if (string.IsNullOrEmpty(bisSource)) { ImGui.TextColored(ColorTextMuted, "-"); return; }
         var (letter, color) = bisSource switch
@@ -300,7 +301,7 @@ public class BiSViewerWindow : Window, IDisposable
         var sz = new Vector2(ts.X + pad.X * 2, ts.Y + pad.Y * 2);
         dl.AddRectFilled(pos, new Vector2(pos.X + sz.X, pos.Y + sz.Y),
             ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, 0.2f)), 3f);
-        ImGui.InvisibleButton($"##src_{bisSource}", sz);
+        ImGui.InvisibleButton($"##src_{bisSource}_{slotKey}", sz);
         dl.AddText(new Vector2(pos.X + pad.X, pos.Y + pad.Y), ImGui.ColorConvertFloat4ToU32(color), letter);
     }
 
@@ -513,7 +514,10 @@ public class BiSViewerWindow : Window, IDisposable
         var baseUrl = !string.IsNullOrEmpty(_config.FrontendBaseUrl) ? _config.FrontendBaseUrl : _config.ApiBaseUrl;
         if (string.IsNullOrEmpty(_config.DefaultGroupShareCode)) return;
         var url = $"{baseUrl.TrimEnd('/')}/group/{_config.DefaultGroupShareCode}";
-        if (!string.IsNullOrEmpty(_config.DefaultTierId)) url += $"?tier={_config.DefaultTierId}&player={playerId}";
+        if (!string.IsNullOrEmpty(_config.DefaultTierId))
+            url += $"?tier={_config.DefaultTierId}&player={playerId}";
+        else
+            url += $"?player={playerId}";
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
 

@@ -40,10 +40,8 @@ public class InventoryService
     // Item level ranges for source classification (Dawntrail 7.2 — AAC Heavyweight Savage)
     // Update these constants each major patch cycle
     private const int IL_SAVAGE = 795;
-    private const int IL_SAVAGE_ARMOR = 790;  // Savage armor/accessories
-    private const int IL_TOME_AUG = 790;      // Augmented tomestone
-    private const int IL_CATCHUP = 780;       // Alliance raid catch-up
-    private const int IL_TOME = 780;          // Unaugmented tomestone
+    private const int IL_SAVAGE_ARMOR = 790;  // Savage armor/accessories + augmented tomestone
+    private const int IL_CATCHUP = 780;       // Alliance raid catch-up + unaugmented tomestone
     private const int IL_CRAFTED = 770;       // Crafted pentamelded
     private const int IL_NORMAL = 760;        // Normal raid
 
@@ -189,6 +187,7 @@ public class InventoryService
                     if (matRow == null) continue;
 
                     var grade = equipped.MateriaGrades[m];
+                    if (grade >= 10) continue; // Materia grades 0-9 only
 
                     // Get the materia item for this grade via the Item collection
                     var materiaItemRef = matRow.Value.Item[grade];

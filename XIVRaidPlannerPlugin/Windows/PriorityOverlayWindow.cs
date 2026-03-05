@@ -127,7 +127,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         var assembly = Assembly.GetExecutingAssembly();
         foreach (var name in SlotIconNames)
         {
-            var resourceName = $"XIVRaidPlannerPlugin.Images.{name}.png";
+            var resourceName = $"XIVRaidPlannerPlugin.Images.slots.{name}.png";
             _slotIcons[name] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
         }
 

@@ -131,7 +131,8 @@ public class ItemMappingService
                 return;
             }
 
-            // Only index equipment items at or above minimum relevant iLv (limits scope to recent tiers)
+            // Only index equipment items at or above minimum relevant iLv (limits scope to recent tiers).
+            // This is a permissive floor — set well below current savage iLv so legacy imports still resolve.
             const uint minItemLevel = 640; // Dawntrail 7.x baseline
             foreach (var item in itemSheet)
             {
