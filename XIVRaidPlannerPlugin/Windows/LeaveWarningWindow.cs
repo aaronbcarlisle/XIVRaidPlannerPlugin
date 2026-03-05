@@ -59,11 +59,11 @@ public class LeaveWarningWindow : Window, IDisposable
             return;
         }
 
-        // Only show when the game dialog is visible — close instantly when it's gone
+        // Only show when the game dialog is visible — hide when it's gone
+        // Don't dismiss the warning state here so it re-appears if the dialog reopens
         var addon = _gameGui.GetAddonByName("SelectYesno", 1);
         if (addon.IsNull || !addon.IsVisible)
         {
-            _leaveWarning.Dismiss();
             IsOpen = false;
             return;
         }

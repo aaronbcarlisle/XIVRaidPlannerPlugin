@@ -635,12 +635,15 @@ public sealed class Plugin : IDalamudPlugin
 
             if (success)
             {
-                ChatGui.Print($"[XRP] Purchase logged: {purchase.ItemName}");
-                _bisData.InvalidatePlayer(playerId);
+                Framework.RunOnFrameworkThread(() =>
+                {
+                    ChatGui.Print($"[XRP] Purchase logged: {purchase.ItemName}");
+                    _bisData.InvalidatePlayer(playerId);
+                });
             }
             else
             {
-                ChatGui.PrintError($"[XRP] Failed to log purchase: {purchase.ItemName}");
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log purchase: {purchase.ItemName}"));
             }
             return success;
         }
@@ -659,11 +662,11 @@ public sealed class Plugin : IDalamudPlugin
 
             if (success)
             {
-                ChatGui.Print($"[XRP] Material purchase logged: {purchase.ItemName}");
+                Framework.RunOnFrameworkThread(() => ChatGui.Print($"[XRP] Material purchase logged: {purchase.ItemName}"));
             }
             else
             {
-                ChatGui.PrintError($"[XRP] Failed to log material purchase: {purchase.ItemName}");
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log material purchase: {purchase.ItemName}"));
             }
             return success;
         }
