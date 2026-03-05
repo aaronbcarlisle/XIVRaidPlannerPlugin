@@ -148,16 +148,6 @@ public class PlayerGearResponse
     [JsonPropertyName("tomeWeapon")] public TomeWeaponInfo TomeWeapon { get; set; } = new();
 }
 
-// ==================== Gear Sync ====================
-
-public class GearSyncSlot
-{
-    [JsonPropertyName("slot")] public string Slot { get; set; } = string.Empty;
-    [JsonPropertyName("currentSource")] public string CurrentSource { get; set; } = "unknown";
-    [JsonPropertyName("hasItem")] public bool HasItem { get; set; }
-    [JsonPropertyName("isAugmented")] public bool IsAugmented { get; set; }
-}
-
 // ==================== Player Update (for gear sync) ====================
 
 public class SnapshotPlayerUpdateRequest

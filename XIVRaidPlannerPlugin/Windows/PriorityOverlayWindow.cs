@@ -16,15 +16,7 @@ namespace XIVRaidPlannerPlugin.Windows;
 /// </summary>
 public class PriorityOverlayWindow : Window, IDisposable
 {
-    // Role colors matching the web app
-    private static readonly Dictionary<string, Vector4> RoleColors = new()
-    {
-        ["tank"] = new Vector4(0.353f, 0.624f, 0.831f, 1f),     // #5a9fd4
-        ["healer"] = new Vector4(0.353f, 0.831f, 0.565f, 1f),   // #5ad490
-        ["melee"] = new Vector4(0.831f, 0.353f, 0.353f, 1f),    // #d45a5a
-        ["ranged"] = new Vector4(0.831f, 0.627f, 0.353f, 1f),   // #d4a05a
-        ["caster"] = new Vector4(0.706f, 0.353f, 0.831f, 1f),   // #b45ad4
-    };
+    private static Dictionary<string, Vector4> RoleColors => GameConstants.RoleColors;
 
     // Job abbreviation -> ClassJob ID (for icon lookup: 62100 + ID = framed icon)
     private static readonly Dictionary<string, uint> JobIconIds = new()
@@ -43,15 +35,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         "earring", "necklace", "bracelet", "ring",
     };
 
-    // Job abbreviation -> embedded PNG filename (lowercase)
-    private static readonly Dictionary<string, string> JobIconFileNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["PLD"] = "pld", ["WAR"] = "war", ["DRK"] = "drk", ["GNB"] = "gnb",
-        ["WHM"] = "whm", ["SCH"] = "sch", ["AST"] = "ast", ["SGE"] = "sge",
-        ["MNK"] = "mnk", ["DRG"] = "drg", ["NIN"] = "nin", ["SAM"] = "sam", ["RPR"] = "rpr", ["VPR"] = "vpr",
-        ["BRD"] = "brd", ["MCH"] = "mch", ["DNC"] = "dnc",
-        ["BLM"] = "blm", ["SMN"] = "smn", ["RDM"] = "rdm", ["PCT"] = "pct",
-    };
+    private static Dictionary<string, string> JobIconFileNames => GameConstants.JobIconFileNames;
 
     // Cached slot icon textures (loaded from embedded PNGs)
     private readonly Dictionary<string, ISharedImmediateTexture?> _slotIcons = new();

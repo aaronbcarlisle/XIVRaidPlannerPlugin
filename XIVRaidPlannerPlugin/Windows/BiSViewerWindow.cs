@@ -28,14 +28,7 @@ public class BiSViewerWindow : Window, IDisposable
     private static readonly Vector4 ColorTextMuted = new(0.322f, 0.322f, 0.357f, 1f);
     private static readonly Vector4 ColorAccent = new(0.078f, 0.722f, 0.651f, 1f);
 
-    private static readonly Dictionary<string, Vector4> RoleColors = new()
-    {
-        ["tank"] = new Vector4(0.353f, 0.624f, 0.831f, 1f),
-        ["healer"] = new Vector4(0.353f, 0.831f, 0.565f, 1f),
-        ["melee"] = new Vector4(0.831f, 0.353f, 0.353f, 1f),
-        ["ranged"] = new Vector4(0.831f, 0.627f, 0.353f, 1f),
-        ["caster"] = new Vector4(0.706f, 0.353f, 0.831f, 1f),
-    };
+    private static Dictionary<string, Vector4> RoleColors => GameConstants.RoleColors;
 
     private static readonly Dictionary<string, Vector4> EquippedSourceColors = new()
     {
@@ -65,14 +58,7 @@ public class BiSViewerWindow : Window, IDisposable
         ["ring1"] = "ring", ["ring2"] = "ring",
     };
 
-    private static readonly Dictionary<string, string> JobIconFileNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["PLD"] = "pld", ["WAR"] = "war", ["DRK"] = "drk", ["GNB"] = "gnb",
-        ["WHM"] = "whm", ["SCH"] = "sch", ["AST"] = "ast", ["SGE"] = "sge",
-        ["MNK"] = "mnk", ["DRG"] = "drg", ["NIN"] = "nin", ["SAM"] = "sam", ["RPR"] = "rpr", ["VPR"] = "vpr",
-        ["BRD"] = "brd", ["MCH"] = "mch", ["DNC"] = "dnc",
-        ["BLM"] = "blm", ["SMN"] = "smn", ["RDM"] = "rdm", ["PCT"] = "pct",
-    };
+    private static Dictionary<string, string> JobIconFileNames => GameConstants.JobIconFileNames;
 
     // Full stat name mapping for materia display
     private static readonly Dictionary<string, string> StatFullNames = new(StringComparer.OrdinalIgnoreCase)
@@ -121,7 +107,14 @@ public class BiSViewerWindow : Window, IDisposable
         if (gear == null) { DrawEmptyState(); return; }
 
         if (_bisData.CanViewOtherPlayers && _bisData.AvailablePlayers is { Count: > 0 })
+        {
+            // Sync dropdown index with currently viewed player
+            var players = _bisData.AvailablePlayers;
+            var viewedIdx = players.FindIndex(p => p.Id == gear.PlayerId);
+            if (viewedIdx >= 0 && viewedIdx != _selectedPlayerIndex)
+                _selectedPlayerIndex = viewedIdx;
             DrawPlayerDropdown(gear);
+        }
         DrawPlayerHeader(gear);
         ImGui.Separator();
 
@@ -145,7 +138,7 @@ public class BiSViewerWindow : Window, IDisposable
         {
             ImGui.TextColored(ColorGearRaid, $"Error: {_bisData.LastError}");
             if (ImGui.Button("Retry") && _bisData.CurrentPlayerGear != null)
-            { _bisData.InvalidatePlayer(_bisData.CurrentPlayerGear.PlayerId); _ = _bisData.FetchPlayerGearAsync(_bisData.CurrentPlayerGear.PlayerId, isCurrentPlayer: true); }
+            { var pid = _bisData.CurrentPlayerGear.PlayerId; _bisData.InvalidatePlayer(pid); _ = _bisData.FetchPlayerGearAsync(pid, isCurrentPlayer: true); }
             return;
         }
         ImGui.TextColored(ColorTextMuted, "No gear data loaded.");
