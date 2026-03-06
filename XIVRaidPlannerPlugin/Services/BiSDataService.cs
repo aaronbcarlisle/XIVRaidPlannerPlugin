@@ -60,38 +60,19 @@ public class BiSDataService
     /// </summary>
     public async Task FetchCurrentPlayerGearAsync(string? characterName = null)
     {
-        if (IsFetching) return;
-        IsFetching = true;
-        LastError = null;
+        // Resolve player ID, then delegate to FetchPlayerGearAsync which manages IsFetching
+        string? playerId = null;
+        if (characterName != null)
+            playerId = _partyMatching.GetPlayerIdForName(characterName);
 
-        try
+        if (playerId == null)
         {
-            // Try to find the planner player ID for the current character
-            string? playerId = null;
-            if (characterName != null)
-            {
-                playerId = _partyMatching.GetPlayerIdForName(characterName);
-            }
+            _log.Warning("[BiSData] Could not match character to planner player");
+            LastError = "Character not matched to a planner player";
+            return;
+        }
 
-            if (playerId == null)
-            {
-                // If no match, try to find via available players list
-                _log.Warning("[BiSData] Could not match character to planner player");
-                LastError = "Character not matched to a planner player";
-                return;
-            }
-
-            await FetchPlayerGearAsync(playerId, isCurrentPlayer: true);
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"[BiSData] Failed to fetch current player gear: {ex.Message}");
-            LastError = ex.Message;
-        }
-        finally
-        {
-            IsFetching = false;
-        }
+        await FetchPlayerGearAsync(playerId, isCurrentPlayer: true);
     }
 
     /// <summary>

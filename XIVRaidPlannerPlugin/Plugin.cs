@@ -545,7 +545,8 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     var weekData = await _apiClient.GetCurrentWeekAsync();
                     var week = weekData?.CurrentWeek ?? 1;
-                    _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week, eligibleSlots);
+                    Framework.RunOnFrameworkThread(() =>
+                        _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week, eligibleSlots));
                 });
                 break;
 
@@ -620,7 +621,8 @@ public sealed class Plugin : IDalamudPlugin
                         MaterialType = purchase.MaterialType,
                         Timestamp = DateTime.UtcNow,
                     };
-                    _lootConfirmWindow.ShowForLoot(lootEvent, capturedPlayerId, charName, floorName, week, null);
+                    Framework.RunOnFrameworkThread(() =>
+                        _lootConfirmWindow.ShowForLoot(lootEvent, capturedPlayerId, charName, floorName, week, null));
                 });
                 break;
 
