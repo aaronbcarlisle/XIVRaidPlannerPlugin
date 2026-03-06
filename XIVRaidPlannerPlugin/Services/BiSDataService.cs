@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,8 +20,8 @@ public class BiSDataService
     private readonly ItemMappingService _itemMapping;
     private readonly IPluginLog _log;
 
-    // Cached gear data per player ID
-    private readonly Dictionary<string, PlayerGearResponse> _gearCache = new();
+    // Cached gear data per player ID (concurrent for safe access from framework + background threads)
+    private readonly ConcurrentDictionary<string, PlayerGearResponse> _gearCache = new();
 
     // Serializes fetch operations to prevent concurrent mutation of cache/state
     private readonly SemaphoreSlim _fetchLock = new(1, 1);
@@ -153,7 +154,7 @@ public class BiSDataService
     /// <summary>Invalidate a specific player's cache entry (e.g., after gear sync).</summary>
     public void InvalidatePlayer(string playerId)
     {
-        _gearCache.Remove(playerId);
+        _gearCache.TryRemove(playerId, out _);
         if (CurrentPlayerGear?.PlayerId == playerId)
             CurrentPlayerGear = null;
         if (ViewedPlayerGear?.PlayerId == playerId)
