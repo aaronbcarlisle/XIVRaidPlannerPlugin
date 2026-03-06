@@ -746,7 +746,7 @@ public sealed class Plugin : IDalamudPlugin
             catch (System.Exception ex)
             {
                 Log.Error($"Manual log exception: {ex}");
-                ChatGui.PrintError($"[XRP] Error: {ex.Message}");
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Error: {ex.Message}"));
             }
         });
     }

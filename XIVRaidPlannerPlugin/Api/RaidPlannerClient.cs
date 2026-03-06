@@ -148,7 +148,7 @@ public class RaidPlannerClient : IDisposable
     /// <summary>Log a vendor purchase (self-log for members).</summary>
     public async Task<bool> CreatePurchaseLogEntryAsync(LootLogCreateRequest request)
     {
-        request.Method = "purchase";
+        request.Method ??= "purchase";
         request.Notes ??= "Auto-logged via Dalamud plugin";
         return await PostAsync(
             $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/loot-log",

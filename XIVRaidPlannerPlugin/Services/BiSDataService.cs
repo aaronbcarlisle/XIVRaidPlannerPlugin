@@ -84,9 +84,11 @@ public class BiSDataService
     /// </summary>
     public async Task FetchPlayerGearAsync(string playerId, bool isCurrentPlayer = false)
     {
-        // Non-current-player fetches yield if another fetch is in progress
-        if (!isCurrentPlayer && !await _fetchLock.WaitAsync(0)) return;
-        else if (isCurrentPlayer) await _fetchLock.WaitAsync();
+        // Current-player fetches wait; non-current-player fetches bail if busy
+        if (isCurrentPlayer)
+            await _fetchLock.WaitAsync();
+        else if (!await _fetchLock.WaitAsync(0))
+            return;
 
         IsFetching = true;
         LastError = null;
