@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
@@ -20,6 +21,9 @@ public class BiSDataService
 
     // Cached gear data per player ID
     private readonly Dictionary<string, PlayerGearResponse> _gearCache = new();
+
+    // Serializes fetch operations to prevent concurrent mutation of cache/state
+    private readonly SemaphoreSlim _fetchLock = new(1, 1);
 
     // Current player's gear (the logged-in user's character)
     public PlayerGearResponse? CurrentPlayerGear { get; private set; }
@@ -80,7 +84,10 @@ public class BiSDataService
     /// </summary>
     public async Task FetchPlayerGearAsync(string playerId, bool isCurrentPlayer = false)
     {
-        if (IsFetching && !isCurrentPlayer) return;
+        // Non-current-player fetches yield if another fetch is in progress
+        if (!isCurrentPlayer && !await _fetchLock.WaitAsync(0)) return;
+        else if (isCurrentPlayer) await _fetchLock.WaitAsync();
+
         IsFetching = true;
         LastError = null;
 
@@ -128,6 +135,7 @@ public class BiSDataService
         finally
         {
             IsFetching = false;
+            _fetchLock.Release();
         }
     }
 

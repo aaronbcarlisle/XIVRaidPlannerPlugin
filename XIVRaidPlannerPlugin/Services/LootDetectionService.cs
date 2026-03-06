@@ -83,6 +83,13 @@ public class LootDetectionService : IDisposable
                 var slot = ResolveItemSlot(itemId, itemName);
                 var materialType = ResolveMaterialType(itemName);
 
+                // Skip items that aren't recognized as gear or materials
+                if (slot == null && materialType == null)
+                {
+                    _log.Debug($"Loot skipped (not gear/material): {playerName} obtained {itemName}");
+                    return;
+                }
+
                 var lootEvent = new LootEvent
                 {
                     PlayerName = playerName,

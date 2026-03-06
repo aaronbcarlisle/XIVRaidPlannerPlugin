@@ -447,8 +447,9 @@ public class BiSViewerWindow : Window, IDisposable
         var total = gear.Gear.Count;
         var acquired = 0;
         var needsAug = 0;
-        foreach (var s in gear.Gear) { if (s.HasItem) { if (NeedsAugmentation(s)) needsAug++; else acquired++; } }
-        ImGui.TextColored(acquired == total ? ColorComplete : ColorTextSecondary, $"Progress: {acquired}/{total} slots complete");
+        foreach (var s in gear.Gear) { if (s.HasItem) { acquired++; if (NeedsAugmentation(s)) needsAug++; } }
+        var allComplete = acquired == total && needsAug == 0;
+        ImGui.TextColored(allComplete ? ColorComplete : ColorTextSecondary, $"Progress: {acquired}/{total} slots complete");
         if (needsAug > 0) { ImGui.SameLine(); ImGui.TextColored(ColorNeedsAug, $" ({needsAug} need augmentation)"); }
         if (gear.TomeWeapon.Pursuing)
         {
@@ -495,7 +496,7 @@ public class BiSViewerWindow : Window, IDisposable
                             return result;
                         }
                     }
-                    catch { break; }
+                    catch { continue; }
                 }
             }
         }
