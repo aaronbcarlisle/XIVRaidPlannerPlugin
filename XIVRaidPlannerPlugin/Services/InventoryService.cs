@@ -105,7 +105,7 @@ public class InventoryService
                     IsHq = item->Flags.HasFlag(InventoryItem.ItemFlags.HighQuality),
                     MateriaTypes = matTypes,
                     MateriaGrades = matGrades,
-                    MateriaCount = matCount,
+                    MateriaCount = Math.Min(matCount, 5),
                 };
             }
 

@@ -26,8 +26,6 @@ public class AddonHighlightService : IDisposable
     private bool _disabled;
 
     // Track registration state
-    private bool _needGreedRegistered;
-    private bool _materiaRegistered;
     private bool _shopsRegistered;
     private bool _inventoryRegistered;
 
@@ -44,19 +42,13 @@ public class AddonHighlightService : IDisposable
     }
 
     /// <summary>Register core addon listeners (NeedGreed + MateriaAttach).</summary>
+    /// <remarks>No-op until highlighting implementations are complete (requires in-game addon inspection).</remarks>
     public void Register()
     {
-        if (!_needGreedRegistered)
-        {
-            _addonLifecycle.RegisterListener(AddonEvent.PreDraw, "NeedGreed", OnNeedGreedPreDraw);
-            _needGreedRegistered = true;
-        }
-        if (!_materiaRegistered)
-        {
-            _addonLifecycle.RegisterListener(AddonEvent.PreDraw, "MateriaAttach", OnMateriaAttachPreDraw);
-            _materiaRegistered = true;
-        }
-        _log.Info("[Highlight] Registered NeedGreed and MateriaAttach listeners");
+        // Intentionally not registering listeners yet — the handlers are scaffolding stubs.
+        // Registering PreDraw listeners with no useful work wastes per-frame cycles.
+        // Will register once OnNeedGreedPreDraw/OnMateriaAttachPreDraw are implemented.
+        _log.Info("[Highlight] Addon highlighting not yet implemented — skipping listener registration");
     }
 
     /// <summary>Register for shop addons (Phase 4).</summary>
@@ -186,10 +178,7 @@ public class AddonHighlightService : IDisposable
 
     public void Dispose()
     {
-        if (_needGreedRegistered)
-            _addonLifecycle.UnregisterListener(AddonEvent.PreDraw, "NeedGreed", OnNeedGreedPreDraw);
-        if (_materiaRegistered)
-            _addonLifecycle.UnregisterListener(AddonEvent.PreDraw, "MateriaAttach", OnMateriaAttachPreDraw);
+        // NeedGreed and MateriaAttach not yet registered (scaffolding only)
         if (_shopsRegistered)
         {
             _addonLifecycle.UnregisterListener(AddonEvent.PreDraw, "Shop", OnShopPreDraw);
