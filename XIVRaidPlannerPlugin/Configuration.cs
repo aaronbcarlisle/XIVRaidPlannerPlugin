@@ -16,26 +16,59 @@ public class Configuration : IPluginConfiguration
     /// <summary>Base URL of the FFXIV Raid Planner API (e.g., "https://xivraidplanner.app").</summary>
     public string ApiBaseUrl { get; set; } = "https://xivraidplanner.app";
 
+    /// <summary>Base URL of the web frontend (for Ctrl+Click links). Falls back to ApiBaseUrl if empty.</summary>
+    public string FrontendBaseUrl { get; set; } = string.Empty;
+
     /// <summary>API key (xrp_...) for authentication.</summary>
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>Selected static group UUID.</summary>
     public string DefaultGroupId { get; set; } = string.Empty;
 
+    /// <summary>Display name of the selected static group (for overlay header).</summary>
+    public string DefaultGroupName { get; set; } = string.Empty;
+
+    /// <summary>Share code of the selected static group (for web app links).</summary>
+    public string DefaultGroupShareCode { get; set; } = string.Empty;
+
     /// <summary>Selected tier UUID.</summary>
     public string DefaultTierId { get; set; } = string.Empty;
+
+    /// <summary>Display name of the selected tier (for overlay header).</summary>
+    public string DefaultTierName { get; set; } = string.Empty;
 
     /// <summary>How loot logging should work.</summary>
     public AutoLogMode AutoLogMode { get; set; } = AutoLogMode.Confirm;
 
-    /// <summary>Whether to show the priority overlay in savage instances.</summary>
+    /// <summary>Whether to show the priority overlay in savage instances (master toggle).</summary>
     public bool ShowOverlay { get; set; } = true;
+
+    /// <summary>Show overlay when entering a raid instance.</summary>
+    public bool ShowOverlayOnEntry { get; set; } = true;
+
+    /// <summary>Show overlay when a duty completes (boss killed).</summary>
+    public bool ShowOverlayOnDutyComplete { get; set; } = false;
+
+    /// <summary>Show overlay when the loot window (Need/Greed) opens.</summary>
+    public bool ShowOverlayOnLootWindow { get; set; } = false;
 
     /// <summary>Warn if leaving an instance with unclaimed priority loot.</summary>
     public bool EnableLeaveWarning { get; set; } = true;
 
-    /// <summary>Scale factor for the overlay (0.5 - 2.0).</summary>
-    public float OverlayScale { get; set; } = 1.0f;
+    /// <summary>Show the BiS viewer in savage instances.</summary>
+    public bool ShowBisViewer { get; set; } = false;
+
+    /// <summary>Auto-sync equipped gear to web app on savage entry.</summary>
+    public bool AutoSyncGear { get; set; } = false;
+
+    /// <summary>Highlight BiS items in the Need/Greed loot window.</summary>
+    public bool EnableBisHighlighting { get; set; } = true;
+
+    /// <summary>Highlight BiS items in tome/book vendor shops.</summary>
+    public bool EnableShopHighlighting { get; set; } = true;
+
+    /// <summary>Highlight BiS items in inventory/armoury chest.</summary>
+    public bool EnableInventoryHighlighting { get; set; } = true;
 
     /// <summary>
     /// Manual overrides for matching in-game character names to planner player IDs.
