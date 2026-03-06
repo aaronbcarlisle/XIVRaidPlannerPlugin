@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build Plugin
+    runs-on: ubuntu-latest
+
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download Dalamud
+        run: |
+          mkdir -p $DALAMUD_HOME
+          curl -sSL https://goatcorp.github.io/dalamud-distrib/latest.zip -o /tmp/dalamud.zip
+          unzip -o /tmp/dalamud.zip -d $DALAMUD_HOME
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: XIVRaidPlannerPlugin
+          path: |
+            XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin.dll
+          if-no-files-found: warn
