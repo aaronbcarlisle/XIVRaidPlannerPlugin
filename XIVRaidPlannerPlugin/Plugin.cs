@@ -301,11 +301,13 @@ public sealed class Plugin : IDalamudPlugin
 
             if (success)
             {
-                // Marshal UI/service updates back to the framework thread
+                // Invalidate cache before re-fetch (safe from background thread — ConcurrentDictionary)
+                _bisData.InvalidatePlayer(freshGear.PlayerId);
+
+                // Marshal UI updates to framework thread
                 Framework.RunOnFrameworkThread(() =>
                 {
                     ChatGui.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
-                    _bisData.InvalidatePlayer(freshGear.PlayerId);
                     _bisViewerWindow.InvalidateEquippedGear();
                 });
 
@@ -321,7 +323,7 @@ public sealed class Plugin : IDalamudPlugin
                         ChatGui.Print($"[XRP] {newlyAcquired.Count} new BiS item(s) detected. Enter a savage instance to auto-log."));
                 }
 
-                // Re-fetch to update the BiS viewer
+                // Re-fetch to update the BiS viewer (cache was invalidated above)
                 var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
                 if (!string.IsNullOrEmpty(charName))
                     await _bisData.FetchCurrentPlayerGearAsync(charName);
