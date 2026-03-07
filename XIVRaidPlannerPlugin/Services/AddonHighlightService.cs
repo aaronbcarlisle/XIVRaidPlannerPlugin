@@ -24,8 +24,8 @@ public unsafe class AddonHighlightService : IDisposable
     private bool _loggedBisItems; // Prevent spamming logs on every PreDraw frame
     private bool _loggedTreeList;
 
-    // Track modified nodes so we can restore original colors
-    private readonly Dictionary<nint, SavedColor> _modifiedNodes = new();
+    // Track modified nodes per addon so clearing one doesn't affect others
+    private readonly Dictionary<string, Dictionary<nint, SavedColor>> _modifiedNodesByAddon = new();
 
     // ==================== ShopExchangeItem Constants (from BisBuddy) ====================
     // Item count at AtkValues[3], item IDs starting at AtkValues[1064]
@@ -79,9 +79,11 @@ public unsafe class AddonHighlightService : IDisposable
 
     private void OnNeedGreedPreDraw(AddonEvent type, AddonArgs args)
     {
+        const string addonName = "NeedGreed";
+
         if (!_config.EnableBisHighlighting || !_itemMapping.HasData)
         {
-            ClearHighlights();
+            ClearHighlights(addonName);
             return;
         }
 
@@ -101,7 +103,7 @@ public unsafe class AddonHighlightService : IDisposable
 
             if (bisIndices.Count == 0)
             {
-                ClearHighlights();
+                ClearHighlights(addonName);
                 return;
             }
 
@@ -116,9 +118,9 @@ public unsafe class AddonHighlightService : IDisposable
                 var ownerNode = (AtkResNode*)renderer->OwnerNode;
 
                 if (isBis)
-                    ApplyBisTintRecursive(ownerNode);
+                    ApplyBisTintRecursive(addonName, ownerNode);
                 else
-                    RestoreNodeRecursive(ownerNode);
+                    RestoreNodeRecursive(addonName, ownerNode);
             }
         }
         catch (Exception ex)
@@ -131,9 +133,11 @@ public unsafe class AddonHighlightService : IDisposable
 
     private void OnShopExchangeItemPreDraw(AddonEvent type, AddonArgs args)
     {
+        const string addonName = "ShopExchangeItem";
+
         if (!_config.EnableShopHighlighting || !_itemMapping.HasData)
         {
-            ClearHighlights();
+            ClearHighlights(addonName);
             return;
         }
 
@@ -142,7 +146,7 @@ public unsafe class AddonHighlightService : IDisposable
             var addon = (AtkUnitBase*)args.Addon.Address;
             if (addon == null || !addon->IsVisible) return;
 
-            HighlightShopItems(addon, "ShopExchangeItem",
+            HighlightShopItems(addon, addonName,
                 ShopExchItemCountIdx, ShopExchItemIdStart, ShopExchTreeListNodeId);
         }
         catch (Exception ex)
@@ -155,9 +159,11 @@ public unsafe class AddonHighlightService : IDisposable
 
     private void OnShopExchangeCurrencyPreDraw(AddonEvent type, AddonArgs args)
     {
+        const string addonName = "ShopExchangeCurrency";
+
         if (!_config.EnableShopHighlighting || !_itemMapping.HasData)
         {
-            ClearHighlights();
+            ClearHighlights(addonName);
             return;
         }
 
@@ -166,7 +172,7 @@ public unsafe class AddonHighlightService : IDisposable
             var addon = (AtkUnitBase*)args.Addon.Address;
             if (addon == null || !addon->IsVisible) return;
 
-            HighlightShopItems(addon, "ShopExchangeCurrency",
+            HighlightShopItems(addon, addonName,
                 ShopCurrItemCountIdx, ShopCurrItemIdStart, ShopCurrTreeListNodeId);
         }
         catch (Exception ex)
@@ -285,12 +291,12 @@ public unsafe class AddonHighlightService : IDisposable
 
             if (isBis)
             {
-                ApplyBisTintRecursive(ownerNode);
+                ApplyBisTintRecursive(addonName, ownerNode);
                 highlighted++;
             }
             else
             {
-                RestoreNodeRecursive(ownerNode);
+                RestoreNodeRecursive(addonName, ownerNode);
             }
         }
 
@@ -299,35 +305,46 @@ public unsafe class AddonHighlightService : IDisposable
     // ==================== Color Tinting ====================
 
     /// <summary>Apply tint to a node and all its children/siblings for full-row highlighting.</summary>
-    private void ApplyBisTintRecursive(AtkResNode* node, int depth = 0)
+    private void ApplyBisTintRecursive(string addonName, AtkResNode* node, int depth = 0)
     {
         if (node == null || depth > 10) return;
-        ApplyBisTint(node);
-        ApplyBisTintRecursive(node->ChildNode, depth + 1);
+        ApplyBisTint(addonName, node);
+        ApplyBisTintRecursive(addonName, node->ChildNode, depth + 1);
         if (depth > 0) // Don't walk siblings of the root node
-            ApplyBisTintRecursive(node->PrevSiblingNode, depth);
+            ApplyBisTintRecursive(addonName, node->PrevSiblingNode, depth);
     }
 
     /// <summary>Restore a node and all its children/siblings.</summary>
-    private void RestoreNodeRecursive(AtkResNode* node, int depth = 0)
+    private void RestoreNodeRecursive(string addonName, AtkResNode* node, int depth = 0)
     {
         if (node == null || depth > 10) return;
-        RestoreNode(node);
-        RestoreNodeRecursive(node->ChildNode, depth + 1);
+        RestoreNode(addonName, node);
+        RestoreNodeRecursive(addonName, node->ChildNode, depth + 1);
         if (depth > 0)
-            RestoreNodeRecursive(node->PrevSiblingNode, depth);
+            RestoreNodeRecursive(addonName, node->PrevSiblingNode, depth);
+    }
+
+    private Dictionary<nint, SavedColor> GetAddonNodes(string addonName)
+    {
+        if (!_modifiedNodesByAddon.TryGetValue(addonName, out var nodes))
+        {
+            nodes = new Dictionary<nint, SavedColor>();
+            _modifiedNodesByAddon[addonName] = nodes;
+        }
+        return nodes;
     }
 
     /// <summary>Apply a strong teal highlight tint to a node, saving its original colors.</summary>
-    private void ApplyBisTint(AtkResNode* node)
+    private void ApplyBisTint(string addonName, AtkResNode* node)
     {
         if (node == null) return;
         var ptr = (nint)node;
+        var nodes = GetAddonNodes(addonName);
 
         // Save original colors only on first modification
-        if (!_modifiedNodes.ContainsKey(ptr))
+        if (!nodes.ContainsKey(ptr))
         {
-            _modifiedNodes[ptr] = new SavedColor
+            nodes[ptr] = new SavedColor
             {
                 MultR = node->MultiplyRed,
                 MultG = node->MultiplyGreen,
@@ -348,12 +365,14 @@ public unsafe class AddonHighlightService : IDisposable
     }
 
     /// <summary>Restore a single node to its original colors if it was modified.</summary>
-    private void RestoreNode(AtkResNode* node)
+    private void RestoreNode(string addonName, AtkResNode* node)
     {
         if (node == null) return;
         var ptr = (nint)node;
 
-        if (_modifiedNodes.TryGetValue(ptr, out var saved))
+        if (!_modifiedNodesByAddon.TryGetValue(addonName, out var nodes)) return;
+
+        if (nodes.TryGetValue(ptr, out var saved))
         {
             node->MultiplyRed = saved.MultR;
             node->MultiplyGreen = saved.MultG;
@@ -361,14 +380,16 @@ public unsafe class AddonHighlightService : IDisposable
             node->AddRed = saved.AddR;
             node->AddGreen = saved.AddG;
             node->AddBlue = saved.AddB;
-            _modifiedNodes.Remove(ptr);
+            nodes.Remove(ptr);
         }
     }
 
-    /// <summary>Restore all modified nodes and clear the tracking dictionary.</summary>
-    private void ClearHighlights()
+    /// <summary>Restore modified nodes for a specific addon.</summary>
+    private void ClearHighlights(string addonName)
     {
-        foreach (var (ptr, saved) in _modifiedNodes)
+        if (!_modifiedNodesByAddon.TryGetValue(addonName, out var nodes)) return;
+
+        foreach (var (ptr, saved) in nodes)
         {
             try
             {
@@ -383,14 +404,38 @@ public unsafe class AddonHighlightService : IDisposable
             catch { /* Node may have been freed */ }
         }
 
-        _modifiedNodes.Clear();
+        nodes.Clear();
+    }
+
+    /// <summary>Restore all modified nodes across all addons.</summary>
+    private void ClearAllHighlights()
+    {
+        foreach (var (_, nodes) in _modifiedNodesByAddon)
+        {
+            foreach (var (ptr, saved) in nodes)
+            {
+                try
+                {
+                    var node = (AtkResNode*)ptr;
+                    node->MultiplyRed = saved.MultR;
+                    node->MultiplyGreen = saved.MultG;
+                    node->MultiplyBlue = saved.MultB;
+                    node->AddRed = saved.AddR;
+                    node->AddGreen = saved.AddG;
+                    node->AddBlue = saved.AddB;
+                }
+                catch { /* Node may have been freed */ }
+            }
+        }
+
+        _modifiedNodesByAddon.Clear();
     }
 
     // ==================== Lifecycle ====================
 
     private void OnAddonClose(AddonEvent type, AddonArgs args)
     {
-        ClearHighlights();
+        ClearHighlights(args.AddonName);
         _loggedBisItems = false;
         _loggedTreeList = false;
     }
@@ -399,7 +444,7 @@ public unsafe class AddonHighlightService : IDisposable
     {
         if (!_registered) return;
 
-        ClearHighlights();
+        ClearAllHighlights();
 
         _addonLifecycle.UnregisterListener(AddonEvent.PreDraw, "NeedGreed", OnNeedGreedPreDraw);
         _addonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "NeedGreed", OnAddonClose);
