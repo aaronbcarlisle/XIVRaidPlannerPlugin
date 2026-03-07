@@ -76,7 +76,7 @@ public sealed class Plugin : IDalamudPlugin
         _itemMapping = new ItemMappingService(DataManager, Log);
         _bisData = new BiSDataService(_apiClient, _partyMatching, _itemMapping, Log);
         _inventoryService = new InventoryService(DataManager, Log);
-        _addonHighlight = new AddonHighlightService(_itemMapping, Configuration, AddonLifecycle, GameGui, Log);
+        _addonHighlight = new AddonHighlightService(_itemMapping, Configuration, AddonLifecycle, Log);
         _addonHighlight.Register();
 
         // Initialize windows

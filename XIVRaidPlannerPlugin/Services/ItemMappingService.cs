@@ -119,28 +119,6 @@ public class ItemMappingService
     /// </summary>
     public IReadOnlyCollection<uint> GetAllBisItemIds() => _bisItemIds;
 
-    /// <summary>
-    /// Get display names for all loaded BiS items via Lumina lookup.
-    /// Used by AddonHighlightService for text node matching.
-    /// </summary>
-    public HashSet<string> GetAllBisItemNames()
-    {
-        var names = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-        var itemSheet = _dataManager.GetExcelSheet<Item>();
-        if (itemSheet == null) return names;
-
-        foreach (var itemId in _bisItemIds)
-        {
-            var item = itemSheet.GetRowOrDefault(itemId);
-            if (item == null) continue;
-            var name = item.Value.Name.ToString();
-            if (!string.IsNullOrEmpty(name))
-                names.Add(name);
-        }
-
-        return names;
-    }
-
     private void BuildNameIndex()
     {
         _nameIndexBuilt = true;

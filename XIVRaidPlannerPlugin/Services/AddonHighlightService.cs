@@ -48,7 +48,6 @@ public unsafe class AddonHighlightService : IDisposable
         ItemMappingService itemMapping,
         Configuration config,
         IAddonLifecycle addonLifecycle,
-        IGameGui gameGui,
         IPluginLog log)
     {
         _itemMapping = itemMapping;
@@ -80,7 +79,11 @@ public unsafe class AddonHighlightService : IDisposable
 
     private void OnNeedGreedPreDraw(AddonEvent type, AddonArgs args)
     {
-        if (!_config.EnableBisHighlighting || !_itemMapping.HasData) return;
+        if (!_config.EnableBisHighlighting || !_itemMapping.HasData)
+        {
+            ClearHighlights();
+            return;
+        }
 
         try
         {
@@ -128,7 +131,11 @@ public unsafe class AddonHighlightService : IDisposable
 
     private void OnShopExchangeItemPreDraw(AddonEvent type, AddonArgs args)
     {
-        if (!_config.EnableShopHighlighting || !_itemMapping.HasData) return;
+        if (!_config.EnableShopHighlighting || !_itemMapping.HasData)
+        {
+            ClearHighlights();
+            return;
+        }
 
         try
         {
@@ -148,7 +155,11 @@ public unsafe class AddonHighlightService : IDisposable
 
     private void OnShopExchangeCurrencyPreDraw(AddonEvent type, AddonArgs args)
     {
-        if (!_config.EnableShopHighlighting || !_itemMapping.HasData) return;
+        if (!_config.EnableShopHighlighting || !_itemMapping.HasData)
+        {
+            ClearHighlights();
+            return;
+        }
 
         try
         {
@@ -217,44 +228,27 @@ public unsafe class AddonHighlightService : IDisposable
             }
         }
 
-        if (!_loggedBisItems && bisListItemIndices.Count > 0)
+        // Also check the shield item itself (stored at itemIdStart + itemCount)
+        if (shieldPresent && _itemMapping.IsBisItem(atkValues[shieldIdx].UInt))
+        {
+            bisListItemIndices.Add(addonShieldIndex);
+            if (!_loggedBisItems)
+                _log.Info($"[Highlight] {addonName}: shield is BiS (ID={atkValues[shieldIdx].UInt}) -> listItemIdx={addonShieldIndex}");
+        }
+
+        if (!_loggedBisItems)
         {
             _log.Info($"[Highlight] {addonName}: {bisListItemIndices.Count} BiS item(s), itemCount={itemCount}, shield={shieldPresent}");
             _loggedBisItems = true;
         }
 
-        // Find the tree list component — try GetNodeById first, fall back to scanning
+        // Find the tree list component by known node ID
         AtkComponentTreeList* treeList = null;
 
         var treeListNode = addon->GetNodeById(treeListNodeId);
         if (treeListNode != null && (ushort)treeListNode->Type >= 1000) // Any component subtype (1000+)
         {
             treeList = (AtkComponentTreeList*)((AtkComponentNode*)treeListNode)->Component;
-        }
-
-        // Fallback: scan all nodes for a component that looks like a tree list
-        if (treeList == null)
-        {
-            for (var n = 0; n < addon->UldManager.NodeListCount; n++)
-            {
-                var node = addon->UldManager.NodeList[n];
-                if (node == null || (ushort)node->Type < 1000) continue; // Skip non-component nodes
-                var comp = (AtkComponentNode*)node;
-                if (comp->Component == null) continue;
-                // Try casting to tree list and check if it has items
-                try
-                {
-                    var candidate = (AtkComponentTreeList*)comp->Component;
-                    if (candidate->Items.Count > 0)
-                    {
-                        treeList = candidate;
-                        if (!_loggedTreeList)
-                            _log.Info($"[Highlight] {addonName}: found tree list via scan (nodeId={node->NodeId}, items={candidate->Items.Count})");
-                        break;
-                    }
-                }
-                catch { /* not a tree list */ }
-            }
         }
 
         if (treeList == null)
@@ -300,8 +294,6 @@ public unsafe class AddonHighlightService : IDisposable
             }
         }
 
-        if (!_loggedBisItems && highlighted > 0)
-            _log.Info($"[Highlight] {addonName}: highlighted {highlighted} item(s)");
     }
 
     // ==================== Color Tinting ====================
