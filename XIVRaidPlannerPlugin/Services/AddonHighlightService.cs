@@ -21,8 +21,9 @@ public unsafe class AddonHighlightService : IDisposable
     private readonly IAddonLifecycle _addonLifecycle;
     private readonly IPluginLog _log;
     private bool _registered;
-    private bool _loggedBisItems; // Prevent spamming logs on every PreDraw frame
-    private bool _loggedTreeList;
+    // Per-addon log flags to prevent spamming logs on every PreDraw frame
+    private readonly HashSet<string> _loggedBisItems = new();
+    private readonly HashSet<string> _loggedTreeList = new();
 
     // Track modified nodes per addon so clearing one doesn't affect others
     private readonly Dictionary<string, Dictionary<nint, SavedColor>> _modifiedNodesByAddon = new();
@@ -207,7 +208,7 @@ public unsafe class AddonHighlightService : IDisposable
             && atkValues[shieldIdx].UInt > 0)
         {
             shieldPresent = true;
-            if (!_loggedBisItems)
+            if (!_loggedBisItems.Contains(addonName))
                 _log.Info($"[Highlight] {addonName}: shield detected at AtkValues[{shieldIdx}] (ID={atkValues[shieldIdx].UInt})");
         }
 
@@ -229,7 +230,7 @@ public unsafe class AddonHighlightService : IDisposable
                 var listItemIdx = i + shieldOffset;
                 bisListItemIndices.Add(listItemIdx);
 
-                if (!_loggedBisItems)
+                if (!_loggedBisItems.Contains(addonName))
                     _log.Info($"[Highlight] {addonName}: BiS ID={v.UInt} atkIdx={i} -> listItemIdx={listItemIdx} (shieldOffset={shieldOffset})");
             }
         }
@@ -238,14 +239,14 @@ public unsafe class AddonHighlightService : IDisposable
         if (shieldPresent && _itemMapping.IsBisItem(atkValues[shieldIdx].UInt))
         {
             bisListItemIndices.Add(addonShieldIndex);
-            if (!_loggedBisItems)
+            if (!_loggedBisItems.Contains(addonName))
                 _log.Info($"[Highlight] {addonName}: shield is BiS (ID={atkValues[shieldIdx].UInt}) -> listItemIdx={addonShieldIndex}");
         }
 
-        if (!_loggedBisItems)
+        if (!_loggedBisItems.Contains(addonName))
         {
             _log.Info($"[Highlight] {addonName}: {bisListItemIndices.Count} BiS item(s), itemCount={itemCount}, shield={shieldPresent}");
-            _loggedBisItems = true;
+            _loggedBisItems.Add(addonName);
         }
 
         // Find the tree list component by known node ID
@@ -259,22 +260,21 @@ public unsafe class AddonHighlightService : IDisposable
 
         if (treeList == null)
         {
-            if (!_loggedTreeList)
+            if (!_loggedTreeList.Contains(addonName))
             {
                 _log.Warning($"[Highlight] {addonName}: no tree list component found (GetNodeById({treeListNodeId}) returned {(treeListNode == null ? "null" : treeListNode->Type.ToString())})");
-                _loggedTreeList = true;
+                _loggedTreeList.Add(addonName);
             }
             return;
         }
 
-        if (!_loggedTreeList)
+        if (!_loggedTreeList.Contains(addonName))
         {
             _log.Info($"[Highlight] {addonName}: tree list has {treeList->Items.Count} visible items");
-            _loggedTreeList = true;
+            _loggedTreeList.Add(addonName);
         }
 
         // Iterate visible tree list items and highlight BiS matches
-        var highlighted = 0;
         for (var i = 0; i < treeList->Items.Count; i++)
         {
             var itemPtr = treeList->Items[i].Value;
@@ -290,16 +290,10 @@ public unsafe class AddonHighlightService : IDisposable
             var isBis = bisListItemIndices.Contains(listIndex);
 
             if (isBis)
-            {
                 ApplyBisTintRecursive(addonName, ownerNode);
-                highlighted++;
-            }
             else
-            {
                 RestoreNodeRecursive(addonName, ownerNode);
-            }
         }
-
     }
 
     // ==================== Color Tinting ====================
@@ -436,8 +430,8 @@ public unsafe class AddonHighlightService : IDisposable
     private void OnAddonClose(AddonEvent type, AddonArgs args)
     {
         ClearHighlights(args.AddonName);
-        _loggedBisItems = false;
-        _loggedTreeList = false;
+        _loggedBisItems.Remove(args.AddonName);
+        _loggedTreeList.Remove(args.AddonName);
     }
 
     public void Dispose()
