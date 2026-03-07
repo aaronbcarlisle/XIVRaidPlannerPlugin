@@ -563,6 +563,29 @@ public class ConfigWindow : Window, IDisposable
             _config.EnableLeaveWarning = leaveWarning;
             _config.Save();
         }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // BiS highlighting section
+        ImGui.TextColored(new Vector4(0.298f, 0.722f, 0.659f, 1f), "BiS Highlighting");
+        ImGui.TextDisabled("Tints BiS items in game UI windows with a teal highlight.");
+        ImGui.Spacing();
+
+        var bisHighlight = _config.EnableBisHighlighting;
+        if (ImGui.Checkbox("Highlight BiS in Loot Window (Need/Greed)", ref bisHighlight))
+        {
+            _config.EnableBisHighlighting = bisHighlight;
+            _config.Save();
+        }
+
+        var shopHighlight = _config.EnableShopHighlighting;
+        if (ImGui.Checkbox("Highlight BiS in Tome Vendor Shops", ref shopHighlight))
+        {
+            _config.EnableShopHighlighting = shopHighlight;
+            _config.Save();
+        }
     }
 
     public void Dispose() { }
