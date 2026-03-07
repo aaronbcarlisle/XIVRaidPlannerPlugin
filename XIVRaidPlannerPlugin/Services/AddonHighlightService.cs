@@ -28,6 +28,10 @@ public unsafe class AddonHighlightService : IDisposable
     // Track modified nodes per addon so clearing one doesn't affect others
     private readonly Dictionary<string, Dictionary<nint, SavedColor>> _modifiedNodesByAddon = new();
 
+    // Reusable collections to avoid per-frame heap allocations in PreDraw handlers
+    private readonly Dictionary<int, bool> _bisIndices = new();
+    private readonly HashSet<int> _bisListItemIndices = new();
+
     // ==================== ShopExchangeItem Constants (from BisBuddy) ====================
     // Item count at AtkValues[3], item IDs starting at AtkValues[1064]
     // Tree list component at node ID 20
@@ -91,18 +95,22 @@ public unsafe class AddonHighlightService : IDisposable
         try
         {
             var addon = (AddonNeedGreed*)args.Addon.Address;
-            if (addon == null || !addon->IsVisible) return;
+            if (addon == null || !addon->IsVisible)
+            {
+                ClearHighlights(addonName);
+                return;
+            }
 
             // Build mapping of item index → BiS status
-            var bisIndices = new Dictionary<int, bool>();
+            _bisIndices.Clear();
             for (var i = 0; i < addon->Items.Length; i++)
             {
                 var itemId = addon->Items[i].ItemId;
                 if (itemId > 0 && _itemMapping.IsBisItem(itemId))
-                    bisIndices[i] = true;
+                    _bisIndices[i] = true;
             }
 
-            if (bisIndices.Count == 0)
+            if (_bisIndices.Count == 0)
             {
                 ClearHighlights(addonName);
                 return;
@@ -110,12 +118,16 @@ public unsafe class AddonHighlightService : IDisposable
 
             // Get the list component by node ID
             var listComponent = (AtkComponentList*)addon->GetComponentByNodeId(NeedGreedListNodeId);
-            if (listComponent == null) return;
+            if (listComponent == null)
+            {
+                ClearHighlights(addonName);
+                return;
+            }
 
             for (var i = 0; i < listComponent->ListLength; i++)
             {
                 var renderer = listComponent->ItemRendererList[i].AtkComponentListItemRenderer;
-                var isBis = bisIndices.ContainsKey(renderer->ListItemIndex);
+                var isBis = _bisIndices.ContainsKey(renderer->ListItemIndex);
                 var ownerNode = (AtkResNode*)renderer->OwnerNode;
 
                 if (isBis)
@@ -145,7 +157,11 @@ public unsafe class AddonHighlightService : IDisposable
         try
         {
             var addon = (AtkUnitBase*)args.Addon.Address;
-            if (addon == null || !addon->IsVisible) return;
+            if (addon == null || !addon->IsVisible)
+            {
+                ClearHighlights(addonName);
+                return;
+            }
 
             HighlightShopItems(addon, addonName,
                 ShopExchItemCountIdx, ShopExchItemIdStart, ShopExchTreeListNodeId);
@@ -171,7 +187,11 @@ public unsafe class AddonHighlightService : IDisposable
         try
         {
             var addon = (AtkUnitBase*)args.Addon.Address;
-            if (addon == null || !addon->IsVisible) return;
+            if (addon == null || !addon->IsVisible)
+            {
+                ClearHighlights(addonName);
+                return;
+            }
 
             HighlightShopItems(addon, addonName,
                 ShopCurrItemCountIdx, ShopCurrItemIdStart, ShopCurrTreeListNodeId);
@@ -192,10 +212,18 @@ public unsafe class AddonHighlightService : IDisposable
         int itemCountIdx, int itemIdStart, uint treeListNodeId)
     {
         var atkValues = addon->AtkValuesSpan;
-        if (atkValues.Length <= itemCountIdx) return;
+        if (atkValues.Length <= itemCountIdx)
+        {
+            ClearHighlights(addonName);
+            return;
+        }
 
         var itemCount = atkValues[itemCountIdx].Int;
-        if (itemCount <= 0) return;
+        if (itemCount <= 0)
+        {
+            ClearHighlights(addonName);
+            return;
+        }
 
         // Detect if a shield item is present (indented under a 1H weapon).
         // Shields are stored at the END of the item ID list (at itemIdStart + itemCount)
@@ -213,7 +241,7 @@ public unsafe class AddonHighlightService : IDisposable
         }
 
         // Build set of BiS ListItemIndex values (accounting for shield offset)
-        var bisListItemIndices = new HashSet<int>();
+        _bisListItemIndices.Clear();
         for (var i = 0; i < itemCount; i++)
         {
             var idx = itemIdStart + i;
@@ -228,7 +256,7 @@ public unsafe class AddonHighlightService : IDisposable
                 // the visual ListItemIndex is shifted by +1
                 var shieldOffset = (shieldPresent && i >= addonShieldIndex) ? 1 : 0;
                 var listItemIdx = i + shieldOffset;
-                bisListItemIndices.Add(listItemIdx);
+                _bisListItemIndices.Add(listItemIdx);
 
                 if (!_loggedBisItems.Contains(addonName))
                     _log.Info($"[Highlight] {addonName}: BiS ID={v.UInt} atkIdx={i} -> listItemIdx={listItemIdx} (shieldOffset={shieldOffset})");
@@ -238,22 +266,28 @@ public unsafe class AddonHighlightService : IDisposable
         // Also check the shield item itself (stored at itemIdStart + itemCount)
         if (shieldPresent && _itemMapping.IsBisItem(atkValues[shieldIdx].UInt))
         {
-            bisListItemIndices.Add(addonShieldIndex);
+            _bisListItemIndices.Add(addonShieldIndex);
             if (!_loggedBisItems.Contains(addonName))
                 _log.Info($"[Highlight] {addonName}: shield is BiS (ID={atkValues[shieldIdx].UInt}) -> listItemIdx={addonShieldIndex}");
         }
 
         if (!_loggedBisItems.Contains(addonName))
         {
-            _log.Info($"[Highlight] {addonName}: {bisListItemIndices.Count} BiS item(s), itemCount={itemCount}, shield={shieldPresent}");
+            _log.Info($"[Highlight] {addonName}: {_bisListItemIndices.Count} BiS item(s), itemCount={itemCount}, shield={shieldPresent}");
             _loggedBisItems.Add(addonName);
+        }
+
+        if (_bisListItemIndices.Count == 0)
+        {
+            ClearHighlights(addonName);
+            return;
         }
 
         // Find the tree list component by known node ID
         AtkComponentTreeList* treeList = null;
 
         var treeListNode = addon->GetNodeById(treeListNodeId);
-        if (treeListNode != null && (ushort)treeListNode->Type >= 1000) // Any component subtype (1000+)
+        if (treeListNode != null && (ushort)treeListNode->Type >= 1000) // Component nodes are type 1000+
         {
             treeList = (AtkComponentTreeList*)((AtkComponentNode*)treeListNode)->Component;
         }
@@ -265,6 +299,7 @@ public unsafe class AddonHighlightService : IDisposable
                 _log.Warning($"[Highlight] {addonName}: no tree list component found (GetNodeById({treeListNodeId}) returned {(treeListNode == null ? "null" : treeListNode->Type.ToString())})");
                 _loggedTreeList.Add(addonName);
             }
+            ClearHighlights(addonName);
             return;
         }
 
@@ -287,7 +322,7 @@ public unsafe class AddonHighlightService : IDisposable
             if (renderer == null) continue;
 
             var listIndex = renderer->ListItemIndex;
-            var isBis = bisListItemIndices.Contains(listIndex);
+            var isBis = _bisListItemIndices.Contains(listIndex);
 
             if (isBis)
                 ApplyBisTintRecursive(addonName, ownerNode);
@@ -404,25 +439,10 @@ public unsafe class AddonHighlightService : IDisposable
     /// <summary>Restore all modified nodes across all addons.</summary>
     private void ClearAllHighlights()
     {
-        foreach (var (_, nodes) in _modifiedNodesByAddon)
-        {
-            foreach (var (ptr, saved) in nodes)
-            {
-                try
-                {
-                    var node = (AtkResNode*)ptr;
-                    node->MultiplyRed = saved.MultR;
-                    node->MultiplyGreen = saved.MultG;
-                    node->MultiplyBlue = saved.MultB;
-                    node->AddRed = saved.AddR;
-                    node->AddGreen = saved.AddG;
-                    node->AddBlue = saved.AddB;
-                }
-                catch { /* Node may have been freed */ }
-            }
-        }
-
-        _modifiedNodesByAddon.Clear();
+        // Collect keys first to avoid modifying dictionary during iteration
+        var addonNames = new List<string>(_modifiedNodesByAddon.Keys);
+        foreach (var addonName in addonNames)
+            ClearHighlights(addonName);
     }
 
     // ==================== Lifecycle ====================
