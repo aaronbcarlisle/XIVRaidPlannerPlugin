@@ -2,7 +2,7 @@
   "Author": "FFXIV Raid Planner",
   "Name": "XIV Raid Planner",
   "Punchline": "In-game loot priority overlay and auto-logging for FFXIV Raid Planner.",
-  "Description": "Displays loot priority rankings during savage raids and auto-logs loot drops to your FFXIV Raid Planner static. Requires an API key from the web app.\n\nCommands:\n/xrp - Toggle priority overlay\n/xrp config - Open configuration",
+  "Description": "Displays loot priority rankings during savage raids and auto-logs loot drops to your FFXIV Raid Planner static. Requires an API key from the web app.\n\nCommands:\n/xrp - Toggle priority overlay\n/xrp bis - Toggle BiS gear viewer\n/xrp sync - Sync equipped gear to web app\n/xrp config - Open configuration",
   "ApplicableVersion": "any",
   "Tags": [
     "raid",

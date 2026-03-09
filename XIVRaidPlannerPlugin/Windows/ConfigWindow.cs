@@ -27,6 +27,7 @@ public class ConfigWindow : Window, IDisposable
     private string _apiKeyInput = "";
     private string _apiUrlInput = "";
     private string _frontendUrlInput = "";
+    private bool _useCustomUrls;
     private string _connectionStatus = "";
     private Vector4 _connectionStatusColor = new(1, 1, 1, 1);
     private bool _isTesting;
@@ -63,6 +64,7 @@ public class ConfigWindow : Window, IDisposable
         _apiKeyInput = _config.ApiKey;
         _apiUrlInput = _config.ApiBaseUrl;
         _frontendUrlInput = _config.FrontendBaseUrl;
+        _useCustomUrls = _config.UseCustomUrls;
         _selectedAutoLogMode = (int)_config.AutoLogMode;
     }
 
@@ -73,7 +75,7 @@ public class ConfigWindow : Window, IDisposable
     {
         // Auto-fetch statics on first draw if credentials are already configured
         if (!_autoConnectAttempted && !_isTesting
-            && !string.IsNullOrEmpty(_config.ApiKey) && !string.IsNullOrEmpty(_config.ApiBaseUrl))
+            && !string.IsNullOrEmpty(_config.ApiKey))
         {
             _autoConnectAttempted = true;
             _isTesting = true;
@@ -128,32 +130,18 @@ public class ConfigWindow : Window, IDisposable
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Advanced"))
+            {
+                DrawAdvancedTab();
+                ImGui.EndTabItem();
+            }
+
             ImGui.EndTabBar();
         }
     }
 
     private void DrawConnectionTab()
     {
-        ImGui.Text("API URL");
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##apiurl", ref _apiUrlInput, 256))
-        {
-            _config.ApiBaseUrl = _apiUrlInput;
-            _config.Save();
-            _apiClient.UpdateAuth();
-        }
-
-        ImGui.Spacing();
-        ImGui.Text("Frontend URL (optional, for Ctrl+Click links)");
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##frontendurl", ref _frontendUrlInput, 256))
-        {
-            _config.FrontendBaseUrl = _frontendUrlInput;
-            _config.Save();
-        }
-        ImGui.TextDisabled("Leave blank if API and frontend share the same URL.");
-
-        ImGui.Spacing();
         ImGui.Text("API Key");
         ImGui.SetNextItemWidth(-1);
         if (ImGui.InputText("##apikey", ref _apiKeyInput, 256, ImGuiInputTextFlags.Password))
@@ -187,7 +175,7 @@ public class ConfigWindow : Window, IDisposable
                         }
                         else
                         {
-                            _connectionStatus = "Connection failed. Check URL and API key.";
+                            _connectionStatus = "Connection failed. Check API key.";
                             _connectionStatusColor = new Vector4(1, 0, 0, 1);
                         }
                         _isTesting = false;
@@ -205,6 +193,47 @@ public class ConfigWindow : Window, IDisposable
             ImGui.SameLine();
             ImGui.TextColored(_connectionStatusColor, _connectionStatus);
         }
+    }
+
+    private void DrawAdvancedTab()
+    {
+        ImGui.TextDisabled("Override default server URLs for development/testing.");
+        ImGui.Spacing();
+
+        if (ImGui.Checkbox("Use custom URLs", ref _useCustomUrls))
+        {
+            _config.UseCustomUrls = _useCustomUrls;
+            _config.Save();
+            _apiClient.UpdateAuth();
+        }
+
+        ImGui.Spacing();
+
+        if (!_useCustomUrls) ImGui.BeginDisabled();
+
+        ImGui.Text("API URL");
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("##apiurl", ref _apiUrlInput, 256))
+        {
+            _config.ApiBaseUrl = _apiUrlInput;
+            _config.Save();
+            _apiClient.UpdateAuth();
+        }
+        if (!_useCustomUrls)
+            ImGui.TextDisabled($"Default: {Configuration.DefaultApiBaseUrl}");
+
+        ImGui.Spacing();
+        ImGui.Text("Frontend URL");
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("##frontendurl", ref _frontendUrlInput, 256))
+        {
+            _config.FrontendBaseUrl = _frontendUrlInput;
+            _config.Save();
+        }
+        if (!_useCustomUrls)
+            ImGui.TextDisabled($"Default: {Configuration.DefaultFrontendBaseUrl}");
+
+        if (!_useCustomUrls) ImGui.EndDisabled();
     }
 
     private void DrawStaticTab()

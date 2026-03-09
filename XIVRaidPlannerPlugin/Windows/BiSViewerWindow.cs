@@ -189,6 +189,14 @@ public class BiSViewerWindow : Window, IDisposable
             if (ImGui.SmallButton("Sync Gear")) { OnSyncRequested?.Invoke(); _equippedGearStale = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Sync equipped gear to web app");
         }
+
+        // Show static group / tier context
+        if (!string.IsNullOrEmpty(_config.DefaultGroupName) || !string.IsNullOrEmpty(_config.DefaultTierName))
+        {
+            var groupLabel = !string.IsNullOrEmpty(_config.DefaultGroupName) ? _config.DefaultGroupName : "—";
+            var tierLabel = !string.IsNullOrEmpty(_config.DefaultTierName) ? _config.DefaultTierName : "Auto";
+            ImGui.TextColored(ColorTextSecondary, $"{groupLabel}  >  {tierLabel}");
+        }
     }
 
     // ==================== Gear Table ====================
@@ -512,7 +520,7 @@ public class BiSViewerWindow : Window, IDisposable
 
     private void OpenPlayerInBrowser(string playerId)
     {
-        var baseUrl = !string.IsNullOrEmpty(_config.FrontendBaseUrl) ? _config.FrontendBaseUrl : _config.ApiBaseUrl;
+        var baseUrl = _config.EffectiveFrontendBaseUrl;
         if (string.IsNullOrEmpty(_config.DefaultGroupShareCode)) return;
         var url = $"{baseUrl.TrimEnd('/')}/group/{_config.DefaultGroupShareCode}";
         if (!string.IsNullOrEmpty(_config.DefaultTierId))
@@ -524,12 +532,26 @@ public class BiSViewerWindow : Window, IDisposable
 
     private void OpenBisLinkInBrowser(string bisLink)
     {
-        // Handle xivgear short format links (sl|..., bis|...)
         var url = bisLink;
-        if (bisLink.StartsWith("sl|"))
-            url = $"https://xivgear.app/?page={bisLink}";
-        else if (bisLink.StartsWith("bis|"))
-            url = $"https://xivgear.app/?page={bisLink}";
+
+        if (bisLink.StartsWith("bis|"))
+        {
+            // Format: bis|job|tier|setIndex — split off trailing setIndex
+            var parts = bisLink.Split('|');
+            if (parts.Length >= 4 && int.TryParse(parts[^1], out var setIndex))
+                url = $"https://xivgear.app/?page={string.Join("|", parts[..^1])}&selectedIndex={setIndex}";
+            else
+                url = $"https://xivgear.app/?page={bisLink}";
+        }
+        else if (bisLink.StartsWith("sl|"))
+        {
+            // Format: sl|uuid or sl|uuid|setIndex
+            var parts = bisLink.Split('|');
+            if (parts.Length >= 3 && int.TryParse(parts[^1], out var setIndex))
+                url = $"https://xivgear.app/?page=sl|{parts[1]}&selectedIndex={setIndex}";
+            else
+                url = $"https://xivgear.app/?page={bisLink}";
+        }
 
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
