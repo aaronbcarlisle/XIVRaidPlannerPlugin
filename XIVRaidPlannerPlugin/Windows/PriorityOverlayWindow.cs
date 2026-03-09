@@ -592,9 +592,7 @@ public class PriorityOverlayWindow : Window, IDisposable
 
     private string? BuildWebAppUrl(string? tab = null, int? floor = null, int? week = null, string? playerId = null)
     {
-        var baseUrl = !string.IsNullOrEmpty(_config.FrontendBaseUrl)
-            ? _config.FrontendBaseUrl.TrimEnd('/')
-            : _config.ApiBaseUrl.TrimEnd('/');
+        var baseUrl = _config.EffectiveFrontendBaseUrl.TrimEnd('/');
         var shareCode = _config.DefaultGroupShareCode;
         var tierId = _config.DefaultTierId;
 

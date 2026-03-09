@@ -19,6 +19,10 @@ public class RaidPlannerClient : IDisposable
     private readonly Configuration _config;
     private readonly IPluginLog _log;
 
+    // Cached resolved tier ID per group (avoids repeated /tiers calls in Auto mode)
+    private string? _cachedResolvedTierId;
+    private string? _cachedResolvedGroupId;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -40,11 +44,67 @@ public class RaidPlannerClient : IDisposable
 
     private HttpClient CreateHttpClient()
     {
-        var baseUrl = _config.ApiBaseUrl.TrimEnd('/');
+        var baseUrl = _config.EffectiveApiBaseUrl.TrimEnd('/');
         var client = new HttpClient { BaseAddress = new Uri(baseUrl) };
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _config.ApiKey);
         return client;
+    }
+
+    /// <summary>
+    /// Resolve the active tier ID for a group when no tier is explicitly configured.
+    /// Caches the result per group to avoid repeated /tiers network calls in Auto mode.
+    /// </summary>
+    private async Task<string?> ResolveActiveTierIdAsync(string groupId)
+    {
+        // Return cached result if same group
+        if (_cachedResolvedTierId != null && _cachedResolvedGroupId == groupId)
+            return _cachedResolvedTierId;
+
+        var tiers = await GetTiersAsync(groupId);
+        var active = tiers.Find(t => t.IsActive);
+        if (active != null)
+        {
+            _log.Information($"Resolved active tier: {active.TierId} ({active.Id})");
+            _cachedResolvedTierId = active.Id;
+            _cachedResolvedGroupId = groupId;
+            return active.Id;
+        }
+
+        _log.Warning("No active tier found for group");
+        return null;
+    }
+
+    /// <summary>Clear the cached auto-resolved tier (e.g., on group change or instance exit).</summary>
+    public void InvalidateResolvedTier()
+    {
+        _cachedResolvedTierId = null;
+        _cachedResolvedGroupId = null;
+    }
+
+    /// <summary>Resolve the active tier for a group, returning the full TierInfo for display purposes.</summary>
+    public async Task<TierInfo?> ResolveActiveTierAsync(string groupId)
+    {
+        var tiers = await GetTiersAsync(groupId);
+        var active = tiers.Find(t => t.IsActive);
+        if (active != null)
+        {
+            _cachedResolvedTierId = active.Id;
+            _cachedResolvedGroupId = groupId;
+        }
+        return active;
+    }
+
+    /// <summary>Resolve group and tier IDs, auto-detecting active tier when in Auto mode.</summary>
+    private async Task<(string? GroupId, string? TierId)> ResolveIdsAsync(string? groupId = null, string? tierId = null)
+    {
+        var gid = groupId ?? _config.DefaultGroupId;
+        var tid = tierId ?? _config.DefaultTierId;
+
+        if (string.IsNullOrEmpty(tid) && !string.IsNullOrEmpty(gid))
+            tid = await ResolveActiveTierIdAsync(gid);
+
+        return (gid, tid);
     }
 
     // ==================== Health ====================
@@ -86,8 +146,10 @@ public class RaidPlannerClient : IDisposable
 
     public async Task<PriorityResponse?> GetPriorityAsync(int? floor = null, string? groupId = null, string? tierId = null)
     {
-        var gid = groupId ?? _config.DefaultGroupId;
-        var tid = tierId ?? _config.DefaultTierId;
+        var (gid, tid) = await ResolveIdsAsync(groupId, tierId);
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return null;
+
         var url = $"/api/static-groups/{gid}/tiers/{tid}/priority";
         if (floor.HasValue)
             url += $"?floor={floor.Value}";
@@ -98,39 +160,46 @@ public class RaidPlannerClient : IDisposable
 
     public async Task<CurrentWeekResponse?> GetCurrentWeekAsync()
     {
+        var (gid, tid) = await ResolveIdsAsync();
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return null;
         return await GetAsync<CurrentWeekResponse>(
-            $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/current-week");
+            $"/api/static-groups/{gid}/tiers/{tid}/current-week");
     }
 
     // ==================== Loot Logging ====================
 
     public async Task<bool> CreateLootLogEntryAsync(LootLogCreateRequest request)
     {
-        return await PostAsync(
-            $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/loot-log",
-            request);
+        var (gid, tid) = await ResolveIdsAsync();
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return false;
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request);
     }
 
     public async Task<bool> CreateMaterialLogEntryAsync(MaterialLogCreateRequest request)
     {
-        return await PostAsync(
-            $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/material-log",
-            request);
+        var (gid, tid) = await ResolveIdsAsync();
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return false;
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/material-log", request);
     }
 
     public async Task<bool> MarkFloorClearedAsync(MarkFloorClearedRequest request)
     {
-        return await PostAsync(
-            $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/mark-floor-cleared",
-            request);
+        var (gid, tid) = await ResolveIdsAsync();
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return false;
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/mark-floor-cleared", request);
     }
 
     // ==================== Player Gear (BiS Tracking) ====================
 
     public async Task<PlayerGearResponse?> GetPlayerGearAsync(string playerId, string? groupId = null, string? tierId = null)
     {
-        var gid = groupId ?? _config.DefaultGroupId;
-        var tid = tierId ?? _config.DefaultTierId;
+        var (gid, tid) = await ResolveIdsAsync(groupId, tierId);
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return null;
         return await GetAsync<PlayerGearResponse>(
             $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}/gear");
     }
@@ -138,8 +207,9 @@ public class RaidPlannerClient : IDisposable
     /// <summary>Sync player gear by updating their current equipment state.</summary>
     public async Task<bool> SyncPlayerGearAsync(string playerId, SnapshotPlayerUpdateRequest request, string? groupId = null, string? tierId = null)
     {
-        var gid = groupId ?? _config.DefaultGroupId;
-        var tid = tierId ?? _config.DefaultTierId;
+        var (gid, tid) = await ResolveIdsAsync(groupId, tierId);
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return false;
         return await PutAsync(
             $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}",
             request);
@@ -148,11 +218,12 @@ public class RaidPlannerClient : IDisposable
     /// <summary>Log a vendor purchase (self-log for members).</summary>
     public async Task<bool> CreatePurchaseLogEntryAsync(LootLogCreateRequest request)
     {
+        var (gid, tid) = await ResolveIdsAsync();
+        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
+            return false;
         request.Method = "purchase";
         request.Notes ??= "Auto-logged via Dalamud plugin";
-        return await PostAsync(
-            $"/api/static-groups/{_config.DefaultGroupId}/tiers/{_config.DefaultTierId}/loot-log",
-            request);
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request);
     }
 
     // ==================== HTTP Helpers ====================

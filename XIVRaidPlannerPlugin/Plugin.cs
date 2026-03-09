@@ -348,11 +348,10 @@ public sealed class Plugin : IDalamudPlugin
         Task.Run(async () =>
         {
             // Auto-detect active tier only if none is configured
-            // Set transiently on config (no Save) so API client sees it; cleared on instance exit
+            // Set transiently on config (no Save) so display shows tier name; cleared on instance exit
             if (!string.IsNullOrEmpty(Configuration.DefaultGroupId) && string.IsNullOrEmpty(Configuration.DefaultTierId))
             {
-                var tiers = await _apiClient.GetTiersAsync(Configuration.DefaultGroupId);
-                var activeTier = tiers.Find(t => t.IsActive);
+                var activeTier = await _apiClient.ResolveActiveTierAsync(Configuration.DefaultGroupId);
                 if (activeTier != null)
                 {
                     Log.Information($"Auto-detected active tier: {activeTier.TierId} ({activeTier.Id})");
@@ -425,6 +424,7 @@ public sealed class Plugin : IDalamudPlugin
         _leaveWarningWindow.IsOpen = false;
         _bisViewerWindow.IsOpen = false;
         _bisData.ClearCache();
+        _apiClient.InvalidateResolvedTier();
 
         // Clear auto-detected tier so it re-detects on next entry
         if (_autoDetectedTier)

@@ -1,6 +1,7 @@
 using Dalamud.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace XIVRaidPlannerPlugin;
 
@@ -11,13 +12,35 @@ namespace XIVRaidPlannerPlugin;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
+    public const string DefaultApiBaseUrl = "https://api.xivraidplanner.app";
+    public const string DefaultFrontendBaseUrl = "https://xivraidplanner.app";
+
     public int Version { get; set; } = 0;
 
-    /// <summary>Base URL of the FFXIV Raid Planner API (e.g., "https://xivraidplanner.app").</summary>
-    public string ApiBaseUrl { get; set; } = "https://xivraidplanner.app";
+    /// <summary>Whether to use custom API/Frontend URLs instead of the defaults.</summary>
+    public bool UseCustomUrls { get; set; } = false;
 
-    /// <summary>Base URL of the web frontend (for Ctrl+Click links). Falls back to ApiBaseUrl if empty.</summary>
+    /// <summary>Custom API base URL (only used when UseCustomUrls is true).</summary>
+    public string ApiBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>Custom frontend base URL (only used when UseCustomUrls is true).</summary>
     public string FrontendBaseUrl { get; set; } = string.Empty;
+
+    /// <summary>Effective API URL — returns custom URL if enabled, otherwise the default.</summary>
+    [JsonIgnore]
+    public string EffectiveApiBaseUrl =>
+        UseCustomUrls && !string.IsNullOrEmpty(ApiBaseUrl) ? ApiBaseUrl : DefaultApiBaseUrl;
+
+    /// <summary>
+    /// Effective frontend URL — returns custom URL if enabled, otherwise the default.
+    /// When using custom URLs but no custom frontend URL is set, falls back to the effective API URL
+    /// to keep API and web links pointed at the same environment.
+    /// </summary>
+    [JsonIgnore]
+    public string EffectiveFrontendBaseUrl =>
+        UseCustomUrls
+            ? (!string.IsNullOrEmpty(FrontendBaseUrl) ? FrontendBaseUrl : EffectiveApiBaseUrl)
+            : DefaultFrontendBaseUrl;
 
     /// <summary>API key (xrp_...) for authentication.</summary>
     public string ApiKey { get; set; } = string.Empty;
