@@ -54,6 +54,7 @@ jobs:
           repo[0]['LastUpdate'] = int(${TIMESTAMP})
           repo[0]['DownloadLinkInstall'] = '${DOWNLOAD_URL}'
           repo[0]['DownloadLinkUpdate'] = '${DOWNLOAD_URL}'
+          repo[0]['DownloadLinkTesting'] = '${DOWNLOAD_URL}'
           with open('repo.json', 'w') as f:
               json.dump(repo, f, indent=2)
               f.write('\n')
