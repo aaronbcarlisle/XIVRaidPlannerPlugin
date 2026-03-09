@@ -191,10 +191,18 @@ public class BiSViewerWindow : Window, IDisposable
         }
 
         // Show static group / tier context
-        if (!string.IsNullOrEmpty(_config.DefaultGroupName) || !string.IsNullOrEmpty(_config.DefaultTierName))
+        if (!string.IsNullOrEmpty(_config.DefaultGroupName)
+            || !string.IsNullOrEmpty(_config.DefaultTierName)
+            || !string.IsNullOrEmpty(_config.DefaultTierId))
         {
             var groupLabel = !string.IsNullOrEmpty(_config.DefaultGroupName) ? _config.DefaultGroupName : "—";
-            var tierLabel = !string.IsNullOrEmpty(_config.DefaultTierName) ? _config.DefaultTierName : "Auto";
+            string tierLabel;
+            if (!string.IsNullOrEmpty(_config.DefaultTierName))
+                tierLabel = _config.DefaultTierName;
+            else if (!string.IsNullOrEmpty(_config.DefaultTierId))
+                tierLabel = "(unknown tier)";
+            else
+                tierLabel = "Auto";
             ImGui.TextColored(ColorTextSecondary, $"{groupLabel}  >  {tierLabel}");
         }
     }

@@ -19,6 +19,10 @@ public class RaidPlannerClient : IDisposable
     private readonly Configuration _config;
     private readonly IPluginLog _log;
 
+    // Cached resolved tier ID per group (avoids repeated /tiers calls in Auto mode)
+    private string? _cachedResolvedTierId;
+    private string? _cachedResolvedGroupId;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -47,19 +51,48 @@ public class RaidPlannerClient : IDisposable
         return client;
     }
 
-    /// <summary>Resolve the active tier ID for a group when no tier is explicitly configured.</summary>
+    /// <summary>
+    /// Resolve the active tier ID for a group when no tier is explicitly configured.
+    /// Caches the result per group to avoid repeated /tiers network calls in Auto mode.
+    /// </summary>
     private async Task<string?> ResolveActiveTierIdAsync(string groupId)
     {
+        // Return cached result if same group
+        if (_cachedResolvedTierId != null && _cachedResolvedGroupId == groupId)
+            return _cachedResolvedTierId;
+
         var tiers = await GetTiersAsync(groupId);
         var active = tiers.Find(t => t.IsActive);
         if (active != null)
         {
             _log.Information($"Resolved active tier: {active.TierId} ({active.Id})");
+            _cachedResolvedTierId = active.Id;
+            _cachedResolvedGroupId = groupId;
             return active.Id;
         }
 
         _log.Warning("No active tier found for group");
         return null;
+    }
+
+    /// <summary>Clear the cached auto-resolved tier (e.g., on group change or instance exit).</summary>
+    public void InvalidateResolvedTier()
+    {
+        _cachedResolvedTierId = null;
+        _cachedResolvedGroupId = null;
+    }
+
+    /// <summary>Resolve the active tier for a group, returning the full TierInfo for display purposes.</summary>
+    public async Task<TierInfo?> ResolveActiveTierAsync(string groupId)
+    {
+        var tiers = await GetTiersAsync(groupId);
+        var active = tiers.Find(t => t.IsActive);
+        if (active != null)
+        {
+            _cachedResolvedTierId = active.Id;
+            _cachedResolvedGroupId = groupId;
+        }
+        return active;
     }
 
     /// <summary>Resolve group and tier IDs, auto-detecting active tier when in Auto mode.</summary>

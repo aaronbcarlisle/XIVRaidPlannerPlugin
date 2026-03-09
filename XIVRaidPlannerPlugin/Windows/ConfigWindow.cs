@@ -175,7 +175,9 @@ public class ConfigWindow : Window, IDisposable
                         }
                         else
                         {
-                            _connectionStatus = "Connection failed. Check API key.";
+                            _connectionStatus = _config.UseCustomUrls
+                                ? "Connection failed. Check API key and custom URLs."
+                                : "Connection failed. Check API key.";
                             _connectionStatusColor = new Vector4(1, 0, 0, 1);
                         }
                         _isTesting = false;
@@ -215,11 +217,16 @@ public class ConfigWindow : Window, IDisposable
         ImGui.SetNextItemWidth(-1);
         if (ImGui.InputText("##apiurl", ref _apiUrlInput, 256))
         {
-            _config.ApiBaseUrl = _apiUrlInput;
-            _config.Save();
-            _apiClient.UpdateAuth();
+            if (string.IsNullOrWhiteSpace(_apiUrlInput) || Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
+            {
+                _config.ApiBaseUrl = _apiUrlInput;
+                _config.Save();
+                _apiClient.UpdateAuth();
+            }
         }
-        if (!_useCustomUrls)
+        if (!string.IsNullOrWhiteSpace(_apiUrlInput) && !Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
+            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Invalid URL. Use an absolute URL, e.g. https://localhost:5000");
+        else if (!_useCustomUrls)
             ImGui.TextDisabled($"Default: {Configuration.DefaultApiBaseUrl}");
 
         ImGui.Spacing();
@@ -292,6 +299,7 @@ public class ConfigWindow : Window, IDisposable
                 _tiers = null;
                 _selectedTierIndex = -1;
                 _config.Save();
+                _apiClient.InvalidateResolvedTier();
             }
         }
 

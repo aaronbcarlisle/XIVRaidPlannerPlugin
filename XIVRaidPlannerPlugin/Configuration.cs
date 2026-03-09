@@ -1,6 +1,7 @@
 using Dalamud.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace XIVRaidPlannerPlugin;
 
@@ -26,12 +27,20 @@ public class Configuration : IPluginConfiguration
     public string FrontendBaseUrl { get; set; } = string.Empty;
 
     /// <summary>Effective API URL — returns custom URL if enabled, otherwise the default.</summary>
+    [JsonIgnore]
     public string EffectiveApiBaseUrl =>
         UseCustomUrls && !string.IsNullOrEmpty(ApiBaseUrl) ? ApiBaseUrl : DefaultApiBaseUrl;
 
-    /// <summary>Effective frontend URL — returns custom URL if enabled, otherwise the default.</summary>
+    /// <summary>
+    /// Effective frontend URL — returns custom URL if enabled, otherwise the default.
+    /// When using custom URLs but no custom frontend URL is set, falls back to the effective API URL
+    /// to keep API and web links pointed at the same environment.
+    /// </summary>
+    [JsonIgnore]
     public string EffectiveFrontendBaseUrl =>
-        UseCustomUrls && !string.IsNullOrEmpty(FrontendBaseUrl) ? FrontendBaseUrl : DefaultFrontendBaseUrl;
+        UseCustomUrls
+            ? (!string.IsNullOrEmpty(FrontendBaseUrl) ? FrontendBaseUrl : EffectiveApiBaseUrl)
+            : DefaultFrontendBaseUrl;
 
     /// <summary>API key (xrp_...) for authentication.</summary>
     public string ApiKey { get; set; } = string.Empty;
