@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    env:
+      DALAMUD_HOME: /tmp/dalamud
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download Dalamud
+        run: |
+          mkdir -p $DALAMUD_HOME
+          curl -sSL https://goatcorp.github.io/dalamud-distrib/latest.zip -o /tmp/dalamud.zip
+          unzip -o /tmp/dalamud.zip -d $DALAMUD_HOME
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/latest.zip
+          generate_release_notes: true
+
+      - name: Update repo.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          TIMESTAMP=$(date +%s)
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/latest.zip"
+
+          python3 -c "
+          import json, sys
+          with open('repo.json', 'r') as f:
+              repo = json.load(f)
+          repo[0]['AssemblyVersion'] = '${VERSION}.0'
+          repo[0]['LastUpdate'] = int(${TIMESTAMP})
+          repo[0]['DownloadLinkInstall'] = '${DOWNLOAD_URL}'
+          repo[0]['DownloadLinkUpdate'] = '${DOWNLOAD_URL}'
+          with open('repo.json', 'w') as f:
+              json.dump(repo, f, indent=2)
+              f.write('\n')
+          "
+
+      - name: Commit repo.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git add repo.json
+          git commit -m "release: update repo.json for ${GITHUB_REF_NAME}"
+          git push origin main

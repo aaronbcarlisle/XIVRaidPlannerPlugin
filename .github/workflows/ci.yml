@@ -39,6 +39,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: XIVRaidPlannerPlugin
-          path: |
-            XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin.dll
+          path: XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/latest.zip
           if-no-files-found: warn
