@@ -16,8 +16,6 @@ namespace XIVRaidPlannerPlugin.Windows;
 /// </summary>
 public class PriorityOverlayWindow : Window, IDisposable
 {
-    private static Dictionary<string, Vector4> RoleColors => GameConstants.RoleColors;
-
     // Job abbreviation -> ClassJob ID (for icon lookup: 62100 + ID = framed icon)
     private static readonly Dictionary<string, uint> JobIconIds = new()
     {
@@ -45,20 +43,11 @@ public class PriorityOverlayWindow : Window, IDisposable
 
     private static Dictionary<string, string[]> MaterialSlotOptions => GameConstants.MaterialSlotOptions;
 
-    private static readonly Vector4 ColorAccent = new(0.298f, 0.722f, 0.659f, 1f);
-    private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);
-    private static readonly Vector4 ColorError = new(0.937f, 0.267f, 0.267f, 1f);
+    private static readonly Vector4 ColorAccent = Theme.Accent;
+    private static readonly Vector4 ColorSuccess = Theme.Success;
+    private static readonly Vector4 ColorError = Theme.Error;
     private static readonly Vector4 ColorMuted = new(0.4f, 0.4f, 0.45f, 1f);
     private static readonly Vector4 ColorLink = new(0.4f, 0.7f, 1.0f, 1f);
-
-    // Floor colors matching the web app design system
-    private static readonly Dictionary<int, Vector4> FloorColors = new()
-    {
-        [1] = new Vector4(0.133f, 0.773f, 0.369f, 1f),  // #22c55e - Floor 1 (Accessories)
-        [2] = new Vector4(0.231f, 0.510f, 0.965f, 1f),  // #3b82f6 - Floor 2 (Left Side)
-        [3] = new Vector4(0.659f, 0.333f, 0.969f, 1f),  // #a855f7 - Floor 3 (Body)
-        [4] = new Vector4(0.961f, 0.620f, 0.043f, 1f),  // #f59e0b - Floor 4 (Weapon)
-    };
 
     private readonly Configuration _config;
 
@@ -205,7 +194,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     {
         if (_priorityData == null || _currentFloorKey == null)
         {
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Waiting for priority data...");
+            ImGui.TextColored(Theme.Warning, "Waiting for priority data...");
             return;
         }
 
@@ -216,7 +205,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         }
 
         // Subheader: tier name - floor name in floor color (Ctrl+Click to open web app), week in gray
-        var floorColor = FloorColors.GetValueOrDefault(_currentFloor, ColorAccent);
+        var floorColor = Theme.FloorColor(_currentFloor);
         if (!string.IsNullOrEmpty(_tierName))
         {
             var tierUrl = BuildWebAppUrl();
@@ -539,7 +528,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     private void DrawJobIcon(string jobAbbrev, Vector2 size, bool dimmed = false)
     {
         var key = jobAbbrev.ToUpperInvariant();
-        var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : new Vector4(1, 1, 1, 1);
+        var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : Theme.White;
 
         // Try embedded icon first
         if (_jobIcons.TryGetValue(key, out var embeddedTex) && embeddedTex != null)
@@ -577,7 +566,7 @@ public class PriorityOverlayWindow : Window, IDisposable
             _ => "melee",
         };
 
-        return RoleColors.GetValueOrDefault(role, new Vector4(1, 1, 1, 1));
+        return Theme.RoleColor(role);
     }
 
     private static string FormatDropName(string drop)

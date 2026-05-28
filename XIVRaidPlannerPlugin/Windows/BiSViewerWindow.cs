@@ -20,15 +20,13 @@ public class BiSViewerWindow : Window, IDisposable
     private static readonly Vector4 ColorGearTome = new(0.176f, 0.831f, 0.749f, 1f);
     private static readonly Vector4 ColorGearBaseTome = new(0.376f, 0.647f, 0.980f, 1f);
     private static readonly Vector4 ColorGearCrafted = new(0.984f, 0.573f, 0.235f, 1f);
-    private static readonly Vector4 ColorComplete = new(0.133f, 0.773f, 0.369f, 1f);
+    private static readonly Vector4 ColorComplete = Theme.Success;
     private static readonly Vector4 ColorNeedsAug = new(0.918f, 0.702f, 0.031f, 1f);
     private static readonly Vector4 ColorMissing = new(0.322f, 0.322f, 0.357f, 1f);
     private static readonly Vector4 ColorTextPrimary = new(0.941f, 0.941f, 0.961f, 1f);
     private static readonly Vector4 ColorTextSecondary = new(0.631f, 0.631f, 0.667f, 1f);
     private static readonly Vector4 ColorTextMuted = new(0.322f, 0.322f, 0.357f, 1f);
     private static readonly Vector4 ColorAccent = new(0.078f, 0.722f, 0.651f, 1f);
-
-    private static Dictionary<string, Vector4> RoleColors => GameConstants.RoleColors;
 
     private static readonly Dictionary<string, Vector4> EquippedSourceColors = new()
     {
@@ -155,7 +153,8 @@ public class BiSViewerWindow : Window, IDisposable
         {
             for (var i = 0; i < players.Count; i++)
             {
-                ImGui.PushStyleColor(ImGuiCol.Text, RoleColors.GetValueOrDefault(players[i].Role, ColorTextMuted));
+                var rc = Theme.RoleColor(players[i].Role);
+                ImGui.PushStyleColor(ImGuiCol.Text, rc == Theme.White ? ColorTextMuted : rc);
                 if (ImGui.Selectable($"{players[i].Name} ({players[i].Job})##{players[i].Id}", i == idx))
                 { _selectedPlayerIndex = i; _ = _bisData.FetchPlayerGearAsync(players[i].Id); _equippedGearStale = true; }
                 ImGui.PopStyleColor();

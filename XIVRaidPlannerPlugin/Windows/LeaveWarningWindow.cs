@@ -123,7 +123,7 @@ public class LeaveWarningWindow : Window, IDisposable
         }
 
         // Warning header
-        ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), "!! Unclaimed Priority Loot !!");
+        ImGui.TextColored(Theme.Error, "!! Unclaimed Priority Loot !!");
         ImGui.Spacing();
 
         foreach (var item in _leaveWarning.WarningItems)
@@ -133,7 +133,7 @@ public class LeaveWarningWindow : Window, IDisposable
                 1 => new Vector4(1, 0.843f, 0, 1),
                 2 => new Vector4(0.753f, 0.753f, 0.753f, 1),
                 3 => new Vector4(0.804f, 0.498f, 0.196f, 1),
-                _ => new Vector4(1, 1, 1, 1),
+                _ => Theme.White,
             };
 
             ImGui.TextColored(rankColor, $"  #{item.Rank}");

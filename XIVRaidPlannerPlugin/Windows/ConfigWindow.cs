@@ -29,7 +29,7 @@ public class ConfigWindow : Window, IDisposable
     private string _frontendUrlInput = "";
     private bool _useCustomUrls;
     private string _connectionStatus = "";
-    private Vector4 _connectionStatusColor = new(1, 1, 1, 1);
+    private Vector4 _connectionStatusColor = Theme.White;
     private bool _isTesting;
     private List<StaticGroupInfo>? _staticGroups;
     private int _selectedGroupIndex = -1;
@@ -80,7 +80,7 @@ public class ConfigWindow : Window, IDisposable
             _autoConnectAttempted = true;
             _isTesting = true;
             _connectionStatus = "Connecting...";
-            _connectionStatusColor = new Vector4(1, 1, 0, 1);
+            _connectionStatusColor = Theme.Warning;
 
             Task.Run(async () =>
             {
@@ -92,7 +92,7 @@ public class ConfigWindow : Window, IDisposable
                     if (result != null)
                     {
                         _connectionStatus = $"Connected (API v{result.Version})";
-                        _connectionStatusColor = new Vector4(0, 1, 0, 1);
+                        _connectionStatusColor = Theme.Success;
                         _staticGroups = groups;
                     }
                     else
@@ -159,7 +159,7 @@ public class ConfigWindow : Window, IDisposable
             {
                 _isTesting = true;
                 _connectionStatus = "Testing...";
-                _connectionStatusColor = new Vector4(1, 1, 0, 1);
+                _connectionStatusColor = Theme.Warning;
 
                 Task.Run(async () =>
                 {
@@ -170,7 +170,7 @@ public class ConfigWindow : Window, IDisposable
                         if (result != null)
                         {
                             _connectionStatus = $"Connected (API v{result.Version})";
-                            _connectionStatusColor = new Vector4(0, 1, 0, 1);
+                            _connectionStatusColor = Theme.Success;
                             _staticGroups = groups;
                         }
                         else
@@ -178,7 +178,7 @@ public class ConfigWindow : Window, IDisposable
                             _connectionStatus = _config.UseCustomUrls
                                 ? "Connection failed. Check API key and custom URLs."
                                 : "Connection failed. Check API key.";
-                            _connectionStatusColor = new Vector4(1, 0, 0, 1);
+                            _connectionStatusColor = Theme.Error;
                         }
                         _isTesting = false;
                     });
@@ -225,7 +225,7 @@ public class ConfigWindow : Window, IDisposable
             }
         }
         if (!string.IsNullOrWhiteSpace(_apiUrlInput) && !Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Invalid URL. Use an absolute URL, e.g. https://localhost:5000");
+            ImGui.TextColored(Theme.Error, "Invalid URL. Use an absolute URL, e.g. https://localhost:5000");
         else if (!_useCustomUrls)
             ImGui.TextDisabled($"Default: {Configuration.DefaultApiBaseUrl}");
 
@@ -250,7 +250,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (_staticGroups == null || _staticGroups.Count == 0)
         {
-            ImGui.TextColored(new Vector4(1, 1, 0, 1),
+            ImGui.TextColored(Theme.Warning,
                 "No statics loaded. Test your connection first.");
             return;
         }
@@ -452,7 +452,7 @@ public class ConfigWindow : Window, IDisposable
         // Current party assignment section
         if (partyNames.Count > 0)
         {
-            ImGui.TextColored(new Vector4(0.298f, 0.722f, 0.659f, 1f), "Current Party");
+            ImGui.TextColored(Theme.Accent, "Current Party");
             ImGui.Separator();
 
             foreach (var partyName in partyNames)
@@ -494,7 +494,7 @@ public class ConfigWindow : Window, IDisposable
         }
         else
         {
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Join a party to assign players.");
+            ImGui.TextColored(Theme.Warning, "Join a party to assign players.");
         }
 
         // Show saved overrides (for players not currently in party)
@@ -505,7 +505,7 @@ public class ConfigWindow : Window, IDisposable
         if (savedOverrides.Count > 0)
         {
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Saved Associations (not in party)");
+            ImGui.TextColored(Theme.Muted, "Saved Associations (not in party)");
             ImGui.Separator();
 
             string? keyToRemove = null;
@@ -606,7 +606,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Spacing();
 
         // BiS highlighting section
-        ImGui.TextColored(new Vector4(0.298f, 0.722f, 0.659f, 1f), "BiS Highlighting");
+        ImGui.TextColored(Theme.Accent, "BiS Highlighting");
         ImGui.TextDisabled("Tints BiS items in game UI windows with a teal highlight.");
         ImGui.Spacing();
 
