@@ -69,14 +69,14 @@ public class RaidPlannerClient : IDisposable
     /// Resolve the active tier ID for a group when no tier is explicitly configured.
     /// Caches the result per group to avoid repeated /tiers network calls in Auto mode.
     /// </summary>
-    private async Task<string?> ResolveActiveTierIdAsync(string groupId, CancellationToken ct = default)
+    private async Task<ApiResult<string>> ResolveActiveTierIdAsync(string groupId, CancellationToken ct = default)
     {
         // Return cached result if same group
         if (_cachedResolvedTierId != null && _cachedResolvedGroupId == groupId)
-            return _cachedResolvedTierId;
+            return ApiResult<string>.Ok(_cachedResolvedTierId);
 
         var result = await GetTiersAsync(groupId, ct);
-        if (!result.IsSuccess) return null;
+        if (!result.IsSuccess) return ApiResult<string>.Fail(result.Error);
 
         var active = result.Value!.Find(t => t.IsActive);
         if (active != null)
@@ -84,11 +84,11 @@ public class RaidPlannerClient : IDisposable
             _log.Information($"Resolved active tier: {active.TierId} ({active.Id})");
             _cachedResolvedTierId = active.Id;
             _cachedResolvedGroupId = groupId;
-            return active.Id;
+            return ApiResult<string>.Ok(active.Id);
         }
 
         _log.Warning("No active tier found for group");
-        return null;
+        return ApiResult<string>.Fail(ApiError.NotFound);
     }
 
     /// <summary>Clear the cached auto-resolved tier (e.g., on group change or instance exit).</summary>
@@ -116,15 +116,23 @@ public class RaidPlannerClient : IDisposable
     }
 
     /// <summary>Resolve group and tier IDs, auto-detecting active tier when in Auto mode.</summary>
-    private async Task<(string? GroupId, string? TierId)> ResolveIdsAsync(string? groupId = null, string? tierId = null, CancellationToken ct = default)
+    private async Task<ApiResult<(string GroupId, string TierId)>> ResolveIdsAsync(string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
         var gid = groupId ?? _config.DefaultGroupId;
         var tid = tierId ?? _config.DefaultTierId;
 
-        if (string.IsNullOrEmpty(tid) && !string.IsNullOrEmpty(gid))
-            tid = await ResolveActiveTierIdAsync(gid, ct);
+        if (string.IsNullOrEmpty(gid))
+            return ApiResult<(string, string)>.Fail(ApiError.NotFound);
 
-        return (gid, tid);
+        if (string.IsNullOrEmpty(tid))
+        {
+            var resolved = await ResolveActiveTierIdAsync(gid, ct);
+            if (!resolved.IsSuccess)
+                return ApiResult<(string, string)>.Fail(resolved.Error);
+            tid = resolved.Value!;
+        }
+
+        return ApiResult<(string, string)>.Ok((gid, tid));
     }
 
     // ==================== Health ====================
@@ -161,9 +169,9 @@ public class RaidPlannerClient : IDisposable
 
     public async Task<ApiResult<PriorityResponse>> GetPriorityAsync(int? floor = null, string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(groupId, tierId, ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<PriorityResponse>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<PriorityResponse>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
 
         var url = $"/api/static-groups/{gid}/tiers/{tid}/priority";
         if (floor.HasValue)
@@ -175,9 +183,9 @@ public class RaidPlannerClient : IDisposable
 
     public async Task<ApiResult<CurrentWeekResponse>> GetCurrentWeekAsync(CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(ct: ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<CurrentWeekResponse>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<CurrentWeekResponse>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await GetAsync<CurrentWeekResponse>(
             $"/api/static-groups/{gid}/tiers/{tid}/current-week", ct);
     }
@@ -186,25 +194,25 @@ public class RaidPlannerClient : IDisposable
 
     public async Task<ApiResult<bool>> CreateLootLogEntryAsync(LootLogCreateRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(ct: ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<bool>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request, ct);
     }
 
     public async Task<ApiResult<bool>> CreateMaterialLogEntryAsync(MaterialLogCreateRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(ct: ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<bool>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/material-log", request, ct);
     }
 
     public async Task<ApiResult<bool>> MarkFloorClearedAsync(MarkFloorClearedRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(ct: ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<bool>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/mark-floor-cleared", request, ct);
     }
 
@@ -212,9 +220,9 @@ public class RaidPlannerClient : IDisposable
 
     public async Task<ApiResult<PlayerGearResponse>> GetPlayerGearAsync(string playerId, string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(groupId, tierId, ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<PlayerGearResponse>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<PlayerGearResponse>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await GetAsync<PlayerGearResponse>(
             $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}/gear", ct);
     }
@@ -222,9 +230,9 @@ public class RaidPlannerClient : IDisposable
     /// <summary>Sync player gear by updating their current equipment state.</summary>
     public async Task<ApiResult<bool>> SyncPlayerGearAsync(string playerId, SnapshotPlayerUpdateRequest request, string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(groupId, tierId, ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<bool>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await PutAsync(
             $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}",
             request, ct);
@@ -233,9 +241,9 @@ public class RaidPlannerClient : IDisposable
     /// <summary>Log a vendor purchase (self-log for members).</summary>
     public async Task<ApiResult<bool>> CreatePurchaseLogEntryAsync(LootLogCreateRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(ct: ct);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return ApiResult<bool>.Fail(ApiError.NotFound);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         request.Method = "purchase";
         request.Notes ??= "Auto-logged via Dalamud plugin";
         return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request, ct);

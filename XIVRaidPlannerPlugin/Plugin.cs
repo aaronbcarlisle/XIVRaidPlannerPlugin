@@ -376,7 +376,16 @@ public sealed class Plugin : IDalamudPlugin
                 return;
 
             var priorityResult = await _apiClient.GetPriorityAsync(floor);
-            _cachedPriority = priorityResult.IsSuccess ? priorityResult.Value : null;
+            if (!priorityResult.IsSuccess)
+            {
+                var msg = priorityResult.Error == ApiError.Unauthorized
+                    ? "[XRP] API key rejected — re-authorize via /xrp config."
+                    : "[XRP] Couldn't fetch priority data. Check connection and try /xrp config.";
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError(msg));
+                return;
+            }
+
+            _cachedPriority = priorityResult.Value;
             if (_cachedPriority != null)
             {
                 var floorName = floor <= _cachedPriority.TierFloors.Count
@@ -908,8 +917,16 @@ public sealed class Plugin : IDalamudPlugin
 
         var floor = _territoryService.CurrentFloor.Value;
         var priorityResult = await _apiClient.GetPriorityAsync(floor);
-        _cachedPriority = priorityResult.IsSuccess ? priorityResult.Value : null;
+        if (!priorityResult.IsSuccess)
+        {
+            var msg = priorityResult.Error == ApiError.Unauthorized
+                ? "[XRP] API key rejected — re-authorize via /xrp config."
+                : "[XRP] Couldn't fetch priority data. Check connection and try /xrp config.";
+            Framework.RunOnFrameworkThread(() => ChatGui.PrintError(msg));
+            return;
+        }
 
+        _cachedPriority = priorityResult.Value;
         if (_cachedPriority != null)
         {
             var floorName = floor <= _cachedPriority.TierFloors.Count
