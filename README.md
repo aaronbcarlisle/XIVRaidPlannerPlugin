@@ -36,7 +36,7 @@ Requires .NET 10 SDK and a Dalamud development environment.
 ```bash
 cd XIVRaidPlannerPlugin
 dotnet build --configuration Release
-dotnet test   # optional — runs 29 unit tests
+dotnet test   # optional — runs 28 unit tests
 ```
 
 The built plugin will be in `XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/`.

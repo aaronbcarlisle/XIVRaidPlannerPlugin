@@ -261,6 +261,11 @@ public class RaidPlannerClient : IDisposable
         }
         catch (TaskCanceledException) { return ApiResult<string>.Fail(ApiError.Network); }
         catch (HttpRequestException) { return ApiResult<string>.Fail(ApiError.Network); }
+        catch (Exception ex)
+        {
+            _log.Error($"POST /api/api-keys/plugin-auth/exchange: {ex.Message}");
+            return ApiResult<string>.Fail(ApiError.Unknown);
+        }
     }
 
     /// <summary>Log a vendor purchase (self-log for members).</summary>

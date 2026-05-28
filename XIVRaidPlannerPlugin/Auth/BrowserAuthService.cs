@@ -62,14 +62,17 @@ public sealed class BrowserAuthService
             return ApiResult<string>.Fail(ApiError.Unauthorized);
         }
 
-        await WriteBrowserResponse(context, "You're signed in. Return to the game.");
-
         var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, ct);
         if (result.IsSuccess)
         {
             _config.ApiKey = result.Value!;
             _config.Save();
             _api.UpdateAuth();
+            await WriteBrowserResponse(context, "You're signed in. Return to the game.");
+        }
+        else
+        {
+            await WriteBrowserResponse(context, "Sign-in failed: the server rejected the request. You can close this tab and try again from the plugin's config window.");
         }
 
         return result;

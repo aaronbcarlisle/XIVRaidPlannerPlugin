@@ -42,7 +42,7 @@ XIVRaidPlannerPlugin/
 │       ├── LootConfirmationWindow.cs   # Confirm/skip popup for detected drops
 │       └── LeaveWarningWindow.cs       # "You have unclaimed loot" warning
 └── XIVRaidPlannerPlugin.Tests/
-    └── (29 unit tests — pure logic, no Dalamud runtime required)
+    └── (28 unit tests — pure logic, no Dalamud runtime required)
 ```
 
 ---
@@ -89,7 +89,7 @@ The plugin supports a one-click sign-in that mints an `xrp_` API key without man
 4. Web app authenticates the user (Discord OAuth or existing session), shows an "Authorize plugin" consent page, then 302-redirects to the loopback `redirect_uri` with `code` and `state` query params.
 5. `HttpListener` receives the redirect. Plugin validates `state` matches, then POSTs to `/api/api-keys/plugin-auth/exchange` with `{ code, code_verifier }`.
 6. Backend exchanges the one-time code for a new `xrp_` API key and returns it.
-7. Plugin stores the key in `Configuration`, calls `RaidPlannerClient.UpdateAuth(key)`, and closes the listener.
+7. Plugin stores the key in `Configuration.ApiKey`, calls `_config.Save()`, then calls `RaidPlannerClient.UpdateAuth()` (no arguments — it reads the key from `Configuration.ApiKey`), and closes the listener.
 
 > **Note:** The web app backend endpoints (`/api/api-keys/plugin-auth/authorize` and `/exchange`) are in a companion PR in the `ffxiv-raid-planner` repo. Browser sign-in is non-functional until those deploy. Manual API key entry (under **Advanced** in ConfigWindow) works today.
 
@@ -107,7 +107,7 @@ The plugin supports a one-click sign-in that mints an `xrp_` API key without man
 # Build
 dotnet build --configuration Release
 
-# Run unit tests (29 tests, no game runtime needed)
+# Run unit tests (28 tests, no game runtime needed)
 dotnet test
 
 # Verify formatting
