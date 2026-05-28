@@ -35,12 +35,20 @@ public unsafe class AddonHighlightService : IDisposable
     // ==================== ShopExchangeItem Constants (from BisBuddy) ====================
     // Item count at AtkValues[3], item IDs starting at AtkValues[1064]
     // Tree list component at node ID 20
+    //
+    // NOTE: These AtkValue offsets are tied to the FFXIV CLIENT version (the in-game
+    // shop addon layout), not the Dalamud SDK version. They are NOT updated by SDK
+    // bumps — they need re-verification after a major game patch that touches shop UI.
+    // If shop highlighting stops working after a game patch, suspect these constants
+    // before suspecting the rest of this file. Validated in-game as part of the
+    // modernization PR's smoke test against the current game client.
     private const int ShopExchItemCountIdx = 3;
     private const int ShopExchItemIdStart = 1064;
     private const uint ShopExchTreeListNodeId = 20;
 
     // ==================== ShopExchangeCurrency Constants (from BisBuddy) ====================
     // Item count at AtkValues[4], item IDs starting at AtkValues[1064]
+    // (See note on ShopExchangeItem constants above re: game-version dependency.)
     private const int ShopCurrItemCountIdx = 4;
     private const int ShopCurrItemIdStart = 1064;
     private const uint ShopCurrTreeListNodeId = 20;
