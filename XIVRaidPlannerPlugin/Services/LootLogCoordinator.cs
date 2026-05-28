@@ -446,10 +446,4 @@ public sealed class LootLogCoordinator
         return mapping;
     }
 
-    /// <summary>Instance wrapper for use within the coordinator (delegates to cached priority).</summary>
-    private Dictionary<string, string> BuildSlotToFloorMapping()
-    {
-        var priority = _cachedPriority();
-        return priority == null ? new Dictionary<string, string>() : BuildSlotToFloorMapping(priority);
-    }
 }

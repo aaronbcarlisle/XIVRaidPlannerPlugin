@@ -123,7 +123,7 @@ The built plugin lands in `XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin
 - `PartyMatcher` name-matching logic
 - `GearSyncService` diff calculation
 - `PkceCodes` PKCE verifier/challenge generation
-- Slot → floor mapping (`GameConstants`)
+- Slot → floor mapping (`LootLogCoordinator`)
 
 ---
 

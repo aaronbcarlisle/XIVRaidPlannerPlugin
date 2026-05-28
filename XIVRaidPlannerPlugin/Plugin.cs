@@ -1,4 +1,3 @@
-using System.Threading.Tasks;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -222,7 +221,7 @@ public sealed class Plugin : IDalamudPlugin
             var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
             if (!string.IsNullOrEmpty(charName) && _bisData.CurrentPlayerGear == null)
             {
-                Task.Run(async () => await _bisData.FetchCurrentPlayerGearAsync(charName));
+                _thread.RunBackground(async () => await _bisData.FetchCurrentPlayerGearAsync(charName));
             }
         }
         _bisViewerWindow.Toggle();
@@ -230,7 +229,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnRefreshRequested()
     {
-        Task.Run(async () =>
+        _thread.RunBackground(async () =>
         {
             Log.Information("Manual refresh requested");
             await _raidSession.RefreshPriority();

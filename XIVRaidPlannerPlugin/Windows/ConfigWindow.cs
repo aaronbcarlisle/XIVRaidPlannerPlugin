@@ -87,7 +87,7 @@ public class ConfigWindow : Window, IDisposable
             _connectionStatus = "Connecting...";
             _connectionStatusColor = Theme.Warning;
 
-            Task.Run(async () =>
+            _thread.RunBackground(async () =>
             {
                 var testResult = await _apiClient.TestConnectionAsync();
                 List<StaticGroupInfo>? groups = null;
@@ -208,7 +208,7 @@ public class ConfigWindow : Window, IDisposable
                     _connectionStatus = "Testing...";
                     _connectionStatusColor = Theme.Warning;
 
-                    Task.Run(async () =>
+                    _thread.RunBackground(async () =>
                     {
                         var testResult = await _apiClient.TestConnectionAsync();
                         List<StaticGroupInfo>? groups = null;
@@ -355,7 +355,7 @@ public class ConfigWindow : Window, IDisposable
         {
             _isFetchingTiers = true;
             var groupId = _config.DefaultGroupId;
-            Task.Run(async () =>
+            _thread.RunBackground(async () =>
             {
                 var tiersResult = await _apiClient.GetTiersAsync(groupId);
                 _thread.RunOnUi(() =>
@@ -451,7 +451,7 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.Button("Load Static Roster"))
                 {
                     _isFetchingRoster = true;
-                    Task.Run(async () =>
+                    _thread.RunBackground(async () =>
                     {
                         var priorityResult = await _apiClient.GetPriorityAsync();
                         _thread.RunOnUi(() =>
@@ -578,7 +578,7 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.Button("Refresh"))
         {
             _isFetchingRoster = true;
-            Task.Run(async () =>
+            _thread.RunBackground(async () =>
             {
                 var priorityResult = await _apiClient.GetPriorityAsync();
                 _thread.RunOnUi(() =>
