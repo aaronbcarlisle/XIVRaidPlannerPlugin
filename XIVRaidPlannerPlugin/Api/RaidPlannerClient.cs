@@ -81,7 +81,8 @@ public class RaidPlannerClient : IDisposable
         var result = await GetTiersAsync(groupId, ct);
         if (!result.IsSuccess) return ApiResult<string>.Fail(result.Error);
 
-        var active = result.Value!.Find(t => t.IsActive);
+        var tiers = result.Value!;
+        var active = tiers.Find(t => t.IsActive);
         if (active != null)
         {
             _log.Information($"Resolved active tier: {active.TierId} ({active.Id})");
@@ -90,7 +91,18 @@ public class RaidPlannerClient : IDisposable
             return ApiResult<string>.Ok(active.Id);
         }
 
-        _log.Warning("No active tier found for group");
+        // No tier flagged active — fall back to the most recent tier.
+        // Backend returns /tiers ordered by created_at DESC, so index 0 is newest.
+        if (tiers.Count > 0)
+        {
+            var fallback = tiers[0];
+            _log.Warning($"No active tier flagged for group; falling back to most recent: {fallback.TierId} ({fallback.Id})");
+            _cachedResolvedTierId = fallback.Id;
+            _cachedResolvedGroupId = groupId;
+            return ApiResult<string>.Ok(fallback.Id);
+        }
+
+        _log.Warning("No tiers exist for group");
         return ApiResult<string>.Fail(ApiError.NotFound);
     }
 
@@ -107,12 +119,22 @@ public class RaidPlannerClient : IDisposable
         var result = await GetTiersAsync(groupId, ct);
         if (!result.IsSuccess) return ApiResult<TierInfo>.Fail(result.Error);
 
-        var active = result.Value!.Find(t => t.IsActive);
+        var tiers = result.Value!;
+        var active = tiers.Find(t => t.IsActive);
         if (active != null)
         {
             _cachedResolvedTierId = active.Id;
             _cachedResolvedGroupId = groupId;
             return ApiResult<TierInfo>.Ok(active);
+        }
+
+        // Fall back to most recent tier when none is flagged active (parity with ResolveActiveTierIdAsync).
+        if (tiers.Count > 0)
+        {
+            var fallback = tiers[0];
+            _cachedResolvedTierId = fallback.Id;
+            _cachedResolvedGroupId = groupId;
+            return ApiResult<TierInfo>.Ok(fallback);
         }
 
         return ApiResult<TierInfo>.Fail(ApiError.NotFound);
@@ -230,6 +252,20 @@ public class RaidPlannerClient : IDisposable
             $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}/gear", ct);
     }
 
+    /// <summary>List snapshot players (with user_id) for the active static + tier — used by auto-detect.</summary>
+    public async Task<ApiResult<List<SnapshotPlayerSummary>>> GetSnapshotPlayersAsync(string? groupId = null, string? tierId = null, CancellationToken ct = default)
+    {
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<List<SnapshotPlayerSummary>>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
+        return await GetAsync<List<SnapshotPlayerSummary>>(
+            $"/api/static-groups/{gid}/tiers/{tid}/players", ct);
+    }
+
+    /// <summary>Fetch the signed-in user's identity (used by auto-detect to match player ownership).</summary>
+    public async Task<ApiResult<UserInfo>> GetCurrentUserAsync(CancellationToken ct = default)
+        => await GetAsync<UserInfo>("/api/auth/me", ct);
+
     /// <summary>Sync player gear by updating their current equipment state.</summary>
     public async Task<ApiResult<bool>> SyncPlayerGearAsync(string playerId, SnapshotPlayerUpdateRequest request, string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
@@ -254,8 +290,16 @@ public class RaidPlannerClient : IDisposable
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
         try
         {
-            var resp = await _httpClient.PostAsync("/api/api-keys/plugin-auth/exchange", content, ct);
-            if (!resp.IsSuccessStatusCode) return ApiResult<string>.Fail(MapStatus(resp.StatusCode));
+            var resp = await _httpClient.PostAsync("/api/auth/api-keys/plugin-auth/exchange", content, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // Surface the server's reason (e.g. "Maximum of 10 active API keys per user",
+                // "Code already used", "PKCE verifier mismatch") so the failure mode is debuggable
+                // instead of collapsing every non-2xx into a generic "Sign-in failed" toast.
+                var errorBody = await resp.Content.ReadAsStringAsync(ct);
+                _log.Error($"POST /api/auth/api-keys/plugin-auth/exchange -> {(int)resp.StatusCode}: {errorBody}");
+                return ApiResult<string>.Fail(MapStatus(resp.StatusCode));
+            }
             var payload = JsonSerializer.Deserialize<PluginAuthExchangeResponse>(
                 await resp.Content.ReadAsStringAsync(ct), JsonOptions);
             return string.IsNullOrEmpty(payload?.ApiKey)
@@ -266,7 +310,7 @@ public class RaidPlannerClient : IDisposable
         catch (HttpRequestException) { return ApiResult<string>.Fail(ApiError.Network); }
         catch (Exception ex)
         {
-            _log.Error($"POST /api/api-keys/plugin-auth/exchange: {ex.Message}");
+            _log.Error($"POST /api/auth/api-keys/plugin-auth/exchange: {ex.Message}");
             return ApiResult<string>.Fail(ApiError.Unknown);
         }
     }
