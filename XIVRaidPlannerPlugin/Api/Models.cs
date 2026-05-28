@@ -163,3 +163,10 @@ public class HealthResponse
     [JsonPropertyName("status")] public string Status { get; set; } = string.Empty;
     [JsonPropertyName("version")] public string Version { get; set; } = string.Empty;
 }
+
+// ==================== Plugin Auth (PKCE exchange) ====================
+
+public class PluginAuthExchangeResponse
+{
+    [JsonPropertyName("apiKey")] public string ApiKey { get; set; } = string.Empty;
+}

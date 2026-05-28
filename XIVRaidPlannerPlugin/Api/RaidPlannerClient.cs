@@ -238,6 +238,31 @@ public class RaidPlannerClient : IDisposable
             request, ct);
     }
 
+    // ==================== Plugin Auth (PKCE exchange) ====================
+
+    /// <summary>
+    /// Exchange a browser-issued auth code + PKCE verifier for an xrp_ API key.
+    /// This endpoint is intentionally unauthenticated — the user is obtaining their first key.
+    /// </summary>
+    public async Task<ApiResult<string>> ExchangePluginAuthCodeAsync(string code, string codeVerifier, CancellationToken ct = default)
+    {
+        var body = new { code, code_verifier = codeVerifier };
+        var json = JsonSerializer.Serialize(body, JsonOptions);
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        try
+        {
+            var resp = await _httpClient.PostAsync("/api/api-keys/plugin-auth/exchange", content, ct);
+            if (!resp.IsSuccessStatusCode) return ApiResult<string>.Fail(MapStatus(resp.StatusCode));
+            var payload = JsonSerializer.Deserialize<PluginAuthExchangeResponse>(
+                await resp.Content.ReadAsStringAsync(ct), JsonOptions);
+            return string.IsNullOrEmpty(payload?.ApiKey)
+                ? ApiResult<string>.Fail(ApiError.Unknown)
+                : ApiResult<string>.Ok(payload.ApiKey);
+        }
+        catch (TaskCanceledException) { return ApiResult<string>.Fail(ApiError.Network); }
+        catch (HttpRequestException) { return ApiResult<string>.Fail(ApiError.Network); }
+    }
+
     /// <summary>Log a vendor purchase (self-log for members).</summary>
     public async Task<ApiResult<bool>> CreatePurchaseLogEntryAsync(LootLogCreateRequest request, CancellationToken ct = default)
     {
