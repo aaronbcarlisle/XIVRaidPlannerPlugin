@@ -19,10 +19,26 @@ public static class GameConstants
     /// <summary>Job abbreviation -> embedded PNG filename (lowercase).</summary>
     public static readonly Dictionary<string, string> JobIconFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["PLD"] = "pld", ["WAR"] = "war", ["DRK"] = "drk", ["GNB"] = "gnb",
-        ["WHM"] = "whm", ["SCH"] = "sch", ["AST"] = "ast", ["SGE"] = "sge",
-        ["MNK"] = "mnk", ["DRG"] = "drg", ["NIN"] = "nin", ["SAM"] = "sam", ["RPR"] = "rpr", ["VPR"] = "vpr",
-        ["BRD"] = "brd", ["MCH"] = "mch", ["DNC"] = "dnc",
-        ["BLM"] = "blm", ["SMN"] = "smn", ["RDM"] = "rdm", ["PCT"] = "pct",
+        ["PLD"] = "pld",
+        ["WAR"] = "war",
+        ["DRK"] = "drk",
+        ["GNB"] = "gnb",
+        ["WHM"] = "whm",
+        ["SCH"] = "sch",
+        ["AST"] = "ast",
+        ["SGE"] = "sge",
+        ["MNK"] = "mnk",
+        ["DRG"] = "drg",
+        ["NIN"] = "nin",
+        ["SAM"] = "sam",
+        ["RPR"] = "rpr",
+        ["VPR"] = "vpr",
+        ["BRD"] = "brd",
+        ["MCH"] = "mch",
+        ["DNC"] = "dnc",
+        ["BLM"] = "blm",
+        ["SMN"] = "smn",
+        ["RDM"] = "rdm",
+        ["PCT"] = "pct",
     };
 }

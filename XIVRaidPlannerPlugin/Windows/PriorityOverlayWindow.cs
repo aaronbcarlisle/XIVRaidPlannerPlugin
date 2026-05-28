@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
-using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
 
@@ -20,11 +20,27 @@ public class PriorityOverlayWindow : Window, IDisposable
     // Job abbreviation -> ClassJob ID (for icon lookup: 62100 + ID = framed icon)
     private static readonly Dictionary<string, uint> JobIconIds = new()
     {
-        ["PLD"] = 19, ["WAR"] = 21, ["DRK"] = 32, ["GNB"] = 37,
-        ["WHM"] = 24, ["SCH"] = 28, ["AST"] = 33, ["SGE"] = 40,
-        ["MNK"] = 20, ["DRG"] = 22, ["NIN"] = 30, ["SAM"] = 34, ["RPR"] = 39, ["VPR"] = 41,
-        ["BRD"] = 23, ["MCH"] = 31, ["DNC"] = 38,
-        ["BLM"] = 25, ["SMN"] = 27, ["RDM"] = 35, ["PCT"] = 42,
+        ["PLD"] = 19,
+        ["WAR"] = 21,
+        ["DRK"] = 32,
+        ["GNB"] = 37,
+        ["WHM"] = 24,
+        ["SCH"] = 28,
+        ["AST"] = 33,
+        ["SGE"] = 40,
+        ["MNK"] = 20,
+        ["DRG"] = 22,
+        ["NIN"] = 30,
+        ["SAM"] = 34,
+        ["RPR"] = 39,
+        ["VPR"] = 41,
+        ["BRD"] = 23,
+        ["MCH"] = 31,
+        ["DNC"] = 38,
+        ["BLM"] = 25,
+        ["SMN"] = 27,
+        ["RDM"] = 35,
+        ["PCT"] = 42,
     };
 
     // Gear slot icon names (loaded from embedded resources)

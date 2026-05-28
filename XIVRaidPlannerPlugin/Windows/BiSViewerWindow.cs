@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
-using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
 using Lumina.Excel.Sheets;
 using XIVRaidPlannerPlugin.Api;
@@ -31,30 +31,49 @@ public class BiSViewerWindow : Window, IDisposable
 
     private static readonly Dictionary<string, Vector4> EquippedSourceColors = new()
     {
-        ["savage"] = ColorGearRaid, ["raid"] = ColorGearRaid,
-        ["tome_up"] = ColorGearTome, ["tome"] = ColorGearTome, ["base_tome"] = ColorGearBaseTome,
+        ["savage"] = ColorGearRaid,
+        ["raid"] = ColorGearRaid,
+        ["tome_up"] = ColorGearTome,
+        ["tome"] = ColorGearTome,
+        ["base_tome"] = ColorGearBaseTome,
         ["crafted"] = ColorGearCrafted,
         ["catchup"] = new Vector4(0.6f, 0.75f, 0.9f, 1f),
-        ["normal"] = ColorTextSecondary, ["relic"] = new Vector4(0.8f, 0.4f, 0.8f, 1f),
-        ["prep"] = ColorTextMuted, ["unknown"] = ColorTextMuted,
+        ["normal"] = ColorTextSecondary,
+        ["relic"] = new Vector4(0.8f, 0.4f, 0.8f, 1f),
+        ["prep"] = ColorTextMuted,
+        ["unknown"] = ColorTextMuted,
     };
 
     // ==================== Slot Data ====================
 
     private static readonly Dictionary<string, string> SlotNames = new()
     {
-        ["weapon"] = "Weapon", ["head"] = "Head", ["body"] = "Body",
-        ["hands"] = "Hands", ["legs"] = "Legs", ["feet"] = "Feet",
-        ["earring"] = "Ears", ["necklace"] = "Neck", ["bracelet"] = "Wrists",
-        ["ring1"] = "R. Ring", ["ring2"] = "L. Ring",
+        ["weapon"] = "Weapon",
+        ["head"] = "Head",
+        ["body"] = "Body",
+        ["hands"] = "Hands",
+        ["legs"] = "Legs",
+        ["feet"] = "Feet",
+        ["earring"] = "Ears",
+        ["necklace"] = "Neck",
+        ["bracelet"] = "Wrists",
+        ["ring1"] = "R. Ring",
+        ["ring2"] = "L. Ring",
     };
 
     private static readonly Dictionary<string, string> SlotIconFileNames = new()
     {
-        ["weapon"] = "weapon", ["head"] = "head", ["body"] = "body",
-        ["hands"] = "hands", ["legs"] = "legs", ["feet"] = "feet",
-        ["earring"] = "earring", ["necklace"] = "necklace", ["bracelet"] = "bracelet",
-        ["ring1"] = "ring", ["ring2"] = "ring",
+        ["weapon"] = "weapon",
+        ["head"] = "head",
+        ["body"] = "body",
+        ["hands"] = "hands",
+        ["legs"] = "legs",
+        ["feet"] = "feet",
+        ["earring"] = "earring",
+        ["necklace"] = "necklace",
+        ["bracelet"] = "bracelet",
+        ["ring1"] = "ring",
+        ["ring2"] = "ring",
     };
 
     private static Dictionary<string, string> JobIconFileNames => GameConstants.JobIconFileNames;
@@ -62,8 +81,13 @@ public class BiSViewerWindow : Window, IDisposable
     // Full stat name mapping for materia display
     private static readonly Dictionary<string, string> StatFullNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["CRT"] = "Critical Hit", ["DH"] = "Direct Hit Rate", ["DET"] = "Determination",
-        ["SKS"] = "Skill Speed", ["SPS"] = "Spell Speed", ["TEN"] = "Tenacity", ["PIE"] = "Piety",
+        ["CRT"] = "Critical Hit",
+        ["DH"] = "Direct Hit Rate",
+        ["DET"] = "Determination",
+        ["SKS"] = "Skill Speed",
+        ["SPS"] = "Spell Speed",
+        ["TEN"] = "Tenacity",
+        ["PIE"] = "Piety",
     };
 
     // ==================== Fields ====================
@@ -310,8 +334,10 @@ public class BiSViewerWindow : Window, IDisposable
         if (string.IsNullOrEmpty(bisSource)) { ImGui.TextColored(ColorTextMuted, "-"); return; }
         var (letter, color) = bisSource switch
         {
-            "raid" => ("R", ColorGearRaid), "tome" => ("T", ColorGearTome),
-            "base_tome" => ("BT", ColorGearBaseTome), "crafted" => ("C", ColorGearCrafted),
+            "raid" => ("R", ColorGearRaid),
+            "tome" => ("T", ColorGearTome),
+            "base_tome" => ("BT", ColorGearBaseTome),
+            "crafted" => ("C", ColorGearCrafted),
             _ => ("-", ColorTextMuted),
         };
         var dl = ImGui.GetWindowDrawList();
