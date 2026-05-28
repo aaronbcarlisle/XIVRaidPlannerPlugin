@@ -22,6 +22,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly PartyMatchingService _partyMatching;
     private readonly IPartyList _partyList;
     private readonly IPlayerState _playerState;
+    private readonly PluginThread _thread;
 
     // UI state
     private string _apiKeyInput = "";
@@ -45,7 +46,7 @@ public class ConfigWindow : Window, IDisposable
     private List<PlayerInfo>? _staticPlayers;
     private bool _isFetchingRoster;
 
-    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState)
+    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState, PluginThread thread)
         : base("XIV Raid Planner - Settings",
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize)
     {
@@ -54,6 +55,7 @@ public class ConfigWindow : Window, IDisposable
         _partyMatching = partyMatching;
         _partyList = partyList;
         _playerState = playerState;
+        _thread = thread;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -92,7 +94,7 @@ public class ConfigWindow : Window, IDisposable
                     groups = groupsResult.IsSuccess ? groupsResult.Value : null;
                 }
                 // Marshal UI state updates back to the framework thread
-                Plugin.Framework.RunOnFrameworkThread(() =>
+                _thread.RunOnUi(() =>
                 {
                     if (testResult.IsSuccess)
                     {
@@ -175,7 +177,7 @@ public class ConfigWindow : Window, IDisposable
                         var groupsResult = await _apiClient.GetStaticGroupsAsync();
                         groups = groupsResult.IsSuccess ? groupsResult.Value : null;
                     }
-                    Plugin.Framework.RunOnFrameworkThread(() =>
+                    _thread.RunOnUi(() =>
                     {
                         if (testResult.IsSuccess)
                         {
@@ -323,7 +325,7 @@ public class ConfigWindow : Window, IDisposable
             Task.Run(async () =>
             {
                 var tiersResult = await _apiClient.GetTiersAsync(groupId);
-                Plugin.Framework.RunOnFrameworkThread(() =>
+                _thread.RunOnUi(() =>
                 {
                     _tiers = tiersResult.IsSuccess ? tiersResult.Value : new List<TierInfo>();
                     _isFetchingTiers = false;
@@ -419,7 +421,7 @@ public class ConfigWindow : Window, IDisposable
                     Task.Run(async () =>
                     {
                         var priorityResult = await _apiClient.GetPriorityAsync();
-                        Plugin.Framework.RunOnFrameworkThread(() =>
+                        _thread.RunOnUi(() =>
                         {
                             if (priorityResult.IsSuccess)
                                 _staticPlayers = priorityResult.Value!.Players;
@@ -546,7 +548,7 @@ public class ConfigWindow : Window, IDisposable
             Task.Run(async () =>
             {
                 var priorityResult = await _apiClient.GetPriorityAsync();
-                Plugin.Framework.RunOnFrameworkThread(() =>
+                _thread.RunOnUi(() =>
                 {
                     if (priorityResult.IsSuccess)
                         _staticPlayers = priorityResult.Value!.Players;

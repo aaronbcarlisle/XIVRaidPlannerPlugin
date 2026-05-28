@@ -6,6 +6,7 @@ using System.Reflection;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
 
 namespace XIVRaidPlannerPlugin.Windows;
@@ -47,6 +48,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     private static readonly Vector4 ColorLink = new(0.4f, 0.7f, 1.0f, 1f);
 
     private readonly Configuration _config;
+    private readonly ITextureProvider _textureProvider;
 
     private PriorityResponse? _priorityData;
     private string? _currentFloorKey;
@@ -94,11 +96,12 @@ public class PriorityOverlayWindow : Window, IDisposable
     /// <summary>Fired when user clicks the refresh button.</summary>
     public event Action? OnRefresh;
 
-    public PriorityOverlayWindow(Configuration config)
+    public PriorityOverlayWindow(Configuration config, ITextureProvider textureProvider)
         : base("XIV Raid Planner",
             ImGuiWindowFlags.NoCollapse)
     {
         _config = config;
+        _textureProvider = textureProvider;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -114,14 +117,14 @@ public class PriorityOverlayWindow : Window, IDisposable
         foreach (var name in SlotIconNames)
         {
             var resourceName = $"XIVRaidPlannerPlugin.Images.slots.{name}.png";
-            _slotIcons[name] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
+            _slotIcons[name] = _textureProvider.GetFromManifestResource(assembly, resourceName);
         }
 
         // Load job icons from embedded resources
         foreach (var (abbrev, fileName) in JobIconFileNames)
         {
             var resourceName = $"XIVRaidPlannerPlugin.Images.jobs.{fileName}.png";
-            _jobIcons[abbrev.ToUpperInvariant()] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
+            _jobIcons[abbrev.ToUpperInvariant()] = _textureProvider.GetFromManifestResource(assembly, resourceName);
         }
     }
 
@@ -542,7 +545,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         if (JobIconIds.TryGetValue(key, out var jobId))
         {
             var iconId = 62100u + jobId;
-            var tex = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrEmpty();
+            var tex = _textureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrEmpty();
             ImGui.Image(tex.Handle, size, new Vector2(0, 0), new Vector2(1, 1), tint);
         }
         else

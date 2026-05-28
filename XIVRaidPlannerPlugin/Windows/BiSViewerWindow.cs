@@ -6,6 +6,7 @@ using System.Reflection;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using Lumina.Excel.Sheets;
 using XIVRaidPlannerPlugin.Api;
 using XIVRaidPlannerPlugin.Services;
@@ -70,6 +71,8 @@ public class BiSViewerWindow : Window, IDisposable
     private readonly BiSDataService _bisData;
     private readonly InventoryService _inventoryService;
     private readonly Configuration _config;
+    private readonly IDataManager _dataManager;
+    private readonly ITextureProvider _textureProvider;
 
     private readonly Dictionary<string, ISharedImmediateTexture?> _slotIcons = new();
     private readonly Dictionary<string, ISharedImmediateTexture?> _jobIcons = new();
@@ -82,12 +85,14 @@ public class BiSViewerWindow : Window, IDisposable
 
     public event System.Action? OnSyncRequested;
 
-    public BiSViewerWindow(BiSDataService bisData, InventoryService inventoryService, Configuration config)
+    public BiSViewerWindow(BiSDataService bisData, InventoryService inventoryService, Configuration config, IDataManager dataManager, ITextureProvider textureProvider)
         : base("XIV Raid Planner \u2014 BiS###XRPBiSViewer", ImGuiWindowFlags.NoCollapse)
     {
         _bisData = bisData;
         _inventoryService = inventoryService;
         _config = config;
+        _dataManager = dataManager;
+        _textureProvider = textureProvider;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(650, 350),
@@ -492,7 +497,7 @@ public class BiSViewerWindow : Window, IDisposable
         try
         {
             // Search Lumina's Materia sheet for a row+grade that produces this item ID
-            var materiaSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Materia>();
+            var materiaSheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Materia>();
             if (materiaSheet == null) { _materiaStatsCache[itemId] = fallback; return fallback; }
 
             foreach (var row in materiaSheet)
@@ -570,7 +575,7 @@ public class BiSViewerWindow : Window, IDisposable
         if (_itemIconIds.TryGetValue(itemId, out var c)) return c;
         try
         {
-            var s = Plugin.DataManager.GetExcelSheet<Item>();
+            var s = _dataManager.GetExcelSheet<Item>();
             if (s == null) { _itemIconIds[itemId] = 0; return 0; }
             var i = s.GetRowOrDefault(itemId);
             if (i == null) { _itemIconIds[itemId] = 0; return 0; }
@@ -584,7 +589,7 @@ public class BiSViewerWindow : Window, IDisposable
     private ISharedImmediateTexture? GetItemIcon(uint iconId)
     {
         if (_itemIcons.TryGetValue(iconId, out var c)) return c;
-        try { var t = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)); _itemIcons[iconId] = t; return t; }
+        try { var t = _textureProvider.GetFromGameIcon(new GameIconLookup(iconId)); _itemIcons[iconId] = t; return t; }
         catch { _itemIcons[iconId] = null; return null; }
     }
 
@@ -595,7 +600,7 @@ public class BiSViewerWindow : Window, IDisposable
         try
         {
             var asm = Assembly.GetExecutingAssembly();
-            var t = Plugin.TextureProvider.GetFromManifestResource(asm, $"XIVRaidPlannerPlugin.Images.slots.{key}.png");
+            var t = _textureProvider.GetFromManifestResource(asm, $"XIVRaidPlannerPlugin.Images.slots.{key}.png");
             _slotIcons[key] = t;
             return t;
         }
@@ -608,7 +613,7 @@ public class BiSViewerWindow : Window, IDisposable
         if (!JobIconFileNames.TryGetValue(job, out var fn)) { _jobIcons[job] = null; return null; }
         try
         {
-            var t = Plugin.TextureProvider.GetFromManifestResource(Assembly.GetExecutingAssembly(), $"XIVRaidPlannerPlugin.Images.jobs.{fn}.png");
+            var t = _textureProvider.GetFromManifestResource(Assembly.GetExecutingAssembly(), $"XIVRaidPlannerPlugin.Images.jobs.{fn}.png");
             _jobIcons[job] = t;
             return t;
         }

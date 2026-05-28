@@ -76,11 +76,11 @@ public sealed class Plugin : IDalamudPlugin
         _addonHighlight.Register();
 
         // Initialize windows
-        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState);
-        _overlayWindow = new PriorityOverlayWindow(Configuration);
+        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState, _thread);
+        _overlayWindow = new PriorityOverlayWindow(Configuration, TextureProvider);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
-        _bisViewerWindow = new BiSViewerWindow(_bisData, _inventoryService, Configuration);
+        _bisViewerWindow = new BiSViewerWindow(_bisData, _inventoryService, Configuration, DataManager, TextureProvider);
 
         WindowSystem.AddWindow(_configWindow);
         WindowSystem.AddWindow(_overlayWindow);
