@@ -42,6 +42,7 @@ public sealed class Plugin : IDalamudPlugin
 
     // Services
     private readonly RaidPlannerClient _apiClient;
+    private readonly PluginThread _thread;
     private readonly TerritoryService _territoryService;
     private readonly PartyMatchingService _partyMatching;
     private readonly LootDetectionService _lootDetection;
@@ -50,6 +51,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly BiSDataService _bisData;
     private readonly InventoryService _inventoryService;
     private readonly AddonHighlightService _addonHighlight;
+    private readonly LootLogCoordinator _lootLog;
 
     // Windows
     public readonly WindowSystem WindowSystem = new("XIVRaidPlannerPlugin");
@@ -69,6 +71,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Initialize services
         _apiClient = new RaidPlannerClient(Configuration, Log);
+        _thread = new PluginThread(Framework, Log);
         _territoryService = new TerritoryService(ClientState, DataManager, Log);
         _partyMatching = new PartyMatchingService(PartyList, Configuration, Log);
         _lootDetection = new LootDetectionService(ChatGui, DataManager, Log);
@@ -92,15 +95,33 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.AddWindow(_leaveWarningWindow);
         WindowSystem.AddWindow(_bisViewerWindow);
 
+        // Construct loot coordinator (after windows so they can be injected)
+        _lootLog = new LootLogCoordinator(
+            _apiClient,
+            _thread,
+            ChatGui,
+            _itemMapping,
+            _bisData,
+            PlayerState,
+            _partyMatching,
+            Log,
+            Configuration,
+            () => _territoryService.CurrentFloor,
+            () => _territoryService.CurrentFloorName,
+            () => _cachedPriority,
+            async () => await RefreshPriority(), // TODO Task 12: replace with direct RaidSessionService dep when extracted
+            _overlayWindow,
+            _lootConfirmWindow);
+
         // Wire up events
         _territoryService.OnSavageEntered += OnSavageEntered;
         _territoryService.OnSavageExited += OnSavageExited;
-        _lootDetection.OnLootObtained += OnLootObtained;
-        _lootDetection.OnItemPurchased += OnItemPurchased;
-        _overlayWindow.OnManualLog += OnManualLog;
-        _overlayWindow.OnMarkFloorCleared += OnMarkFloorCleared;
+        _lootDetection.OnLootObtained += _lootLog.OnLootObtained;
+        _lootDetection.OnItemPurchased += _lootLog.OnItemPurchased;
+        _overlayWindow.OnManualLog += _lootLog.OnManualLog;
+        _overlayWindow.OnMarkFloorCleared += _lootLog.OnMarkFloorCleared;
         _overlayWindow.OnRefresh += OnRefreshRequested;
-        _lootConfirmWindow.OnConfirm += OnLootConfirmed;
+        _lootConfirmWindow.OnConfirm += _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested += SyncGear;
 
         // Register commands
@@ -144,12 +165,12 @@ public sealed class Plugin : IDalamudPlugin
 
         _territoryService.OnSavageEntered -= OnSavageEntered;
         _territoryService.OnSavageExited -= OnSavageExited;
-        _lootDetection.OnLootObtained -= OnLootObtained;
-        _lootDetection.OnItemPurchased -= OnItemPurchased;
-        _overlayWindow.OnManualLog -= OnManualLog;
-        _overlayWindow.OnMarkFloorCleared -= OnMarkFloorCleared;
+        _lootDetection.OnLootObtained -= _lootLog.OnLootObtained;
+        _lootDetection.OnItemPurchased -= _lootLog.OnItemPurchased;
+        _overlayWindow.OnManualLog -= _lootLog.OnManualLog;
+        _overlayWindow.OnMarkFloorCleared -= _lootLog.OnMarkFloorCleared;
         _overlayWindow.OnRefresh -= OnRefreshRequested;
-        _lootConfirmWindow.OnConfirm -= OnLootConfirmed;
+        _lootConfirmWindow.OnConfirm -= _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested -= SyncGear;
 
         // Dispose windows
@@ -314,7 +335,7 @@ public sealed class Plugin : IDalamudPlugin
                 // Auto-log loot entries only when in a savage instance with reliable floor data
                 if (newlyAcquired.Count > 0 && _cachedPriority != null && _territoryService.CurrentFloor != null)
                 {
-                    try { await LogNewAcquisitionsAsync(freshGear.PlayerId, newlyAcquired); }
+                    try { await _lootLog.LogNewAcquisitionsAsync(freshGear.PlayerId, newlyAcquired); }
                     catch (System.Exception ex) { Log.Warning($"Loot logging failed (non-critical): {ex.Message}"); }
                 }
                 else if (newlyAcquired.Count > 0)
@@ -522,322 +543,6 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    // ==================== Loot Detection ====================
-
-    private void OnLootObtained(LootEvent loot)
-    {
-        if (string.IsNullOrEmpty(Configuration.ApiKey))
-            return;
-
-        var playerId = _partyMatching.GetPlayerIdForName(loot.PlayerName);
-        if (playerId == null)
-        {
-            Log.Warning($"Could not match loot recipient '{loot.PlayerName}' to a planner player");
-            return;
-        }
-
-        var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-
-        // Look up player-specific augmentable slots for materials
-        string[]? eligibleSlots = null;
-        if (loot.IsMaterial && loot.MaterialType != null && _cachedPriority != null)
-        {
-            var playerInfo = _cachedPriority.Players.Find(p => p.Id == playerId);
-            if (playerInfo?.AugmentableSlots != null &&
-                playerInfo.AugmentableSlots.TryGetValue(loot.MaterialType, out var slots))
-            {
-                eligibleSlots = slots.ToArray();
-            }
-        }
-
-        switch (Configuration.AutoLogMode)
-        {
-            case AutoLogMode.Confirm:
-                Task.Run(async () =>
-                {
-                    var weekResult = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-                    Framework.RunOnFrameworkThread(() =>
-                        _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week, eligibleSlots));
-                });
-                break;
-
-            case AutoLogMode.Auto:
-                Task.Run(async () =>
-                {
-                    var weekResult = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-                    // Auto-select slot if only one option; otherwise log without augmentation
-                    var autoSlot = eligibleSlots is { Length: 1 } ? eligibleSlots[0] : null;
-                    await LogLootAsync(playerId, loot.GearSlot, loot.MaterialType, floorName, week, autoSlot);
-                    Log.Information($"Auto-logged: {loot.ItemName} -> {loot.PlayerName}");
-                });
-                break;
-
-            case AutoLogMode.Manual:
-                // Do nothing - user must use overlay buttons
-                break;
-        }
-    }
-
-    // ==================== Purchase Detection (Phase 5A) ====================
-
-    private void OnItemPurchased(PurchaseEvent purchase)
-    {
-        if (string.IsNullOrEmpty(Configuration.ApiKey))
-            return;
-
-        // Only auto-log if the purchased item is BiS
-        if (!_itemMapping.HasData || !_itemMapping.IsBisItem(purchase.ItemId))
-        {
-            Log.Debug($"Purchased item {purchase.ItemName} is not BiS — skipping auto-log");
-            return;
-        }
-
-        // Find current player's planner ID
-        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
-        if (string.IsNullOrEmpty(charName))
-            return;
-
-        var playerId = _partyMatching.GetPlayerIdForName(charName);
-        if (playerId == null)
-        {
-            // Try using the BiS data player ID if party matching hasn't run
-            playerId = _bisData.CurrentPlayerGear?.PlayerId;
-        }
-
-        if (playerId == null)
-        {
-            Log.Warning($"Could not match character to planner player for purchase logging");
-            return;
-        }
-
-        var capturedPlayerId = playerId;
-        var floorName = _territoryService.CurrentFloorName ?? "M9S"; // Default to M9S for vendor purchases
-
-        switch (Configuration.AutoLogMode)
-        {
-            case AutoLogMode.Confirm:
-                Task.Run(async () =>
-                {
-                    var weekResult = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-
-                    // Show confirmation for the purchase
-                    var lootEvent = new LootEvent
-                    {
-                        PlayerName = charName,
-                        ItemName = purchase.ItemName,
-                        ItemId = purchase.ItemId,
-                        GearSlot = purchase.GearSlot,
-                        MaterialType = purchase.MaterialType,
-                        Timestamp = DateTime.UtcNow,
-                    };
-                    Framework.RunOnFrameworkThread(() =>
-                        _lootConfirmWindow.ShowForLoot(lootEvent, capturedPlayerId, charName, floorName, week, null));
-                });
-                break;
-
-            case AutoLogMode.Auto:
-                Task.Run(async () =>
-                {
-                    var weekResult = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-                    await LogPurchaseAsync(capturedPlayerId, purchase, floorName, week);
-                });
-                break;
-
-            case AutoLogMode.Manual:
-                // Don't auto-log
-                ChatGui.Print($"[XRP] BiS purchase detected: {purchase.ItemName}. Use /xrp sync to update.");
-                break;
-        }
-    }
-
-    private async Task<bool> LogPurchaseAsync(string playerId, PurchaseEvent purchase, string floorName, int weekNumber)
-    {
-        if (purchase.IsGear && purchase.GearSlot != null)
-        {
-            var result = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                ItemSlot = purchase.GearSlot,
-                RecipientPlayerId = playerId,
-                Method = "purchase",
-                Notes = "Auto-logged via Dalamud plugin",
-                MarkAcquired = true,
-            });
-
-            if (result.IsSuccess)
-            {
-                Framework.RunOnFrameworkThread(() =>
-                {
-                    ChatGui.Print($"[XRP] Purchase logged: {purchase.ItemName}");
-                    _bisData.InvalidatePlayer(playerId);
-                });
-            }
-            else
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log purchase: {purchase.ItemName}"));
-            }
-            return result.IsSuccess;
-        }
-
-        if (purchase.IsMaterial && purchase.MaterialType != null)
-        {
-            var result = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                MaterialType = purchase.MaterialType,
-                RecipientPlayerId = playerId,
-                Method = "purchase",
-                Notes = "Auto-logged via Dalamud plugin",
-            });
-
-            if (result.IsSuccess)
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.Print($"[XRP] Material purchase logged: {purchase.ItemName}"));
-            }
-            else
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log material purchase: {purchase.ItemName}"));
-            }
-            return result.IsSuccess;
-        }
-
-        return false;
-    }
-
-    // ==================== Loot Logging ====================
-
-    private void OnManualLog(string playerId, string slot, string playerName, string? slotAugmented)
-    {
-        var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-        Log.Information($"Manual log requested: {slot} -> {playerName} (floor={floorName}, player={playerId}, slotAugmented={slotAugmented ?? "none"})");
-        ChatGui.Print($"[XRP] Logging {slot} -> {playerName}...");
-
-        Task.Run(async () =>
-        {
-            try
-            {
-                var weekResult = await _apiClient.GetCurrentWeekAsync();
-                var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-
-                // Determine if this is a gear slot or material
-                string? gearSlot = null;
-                string? materialType = null;
-
-                if (slot is "twine" or "glaze" or "solvent" or "universal_tomestone")
-                    materialType = slot;
-                else
-                    gearSlot = slot;
-
-                var success = await LogLootAsync(playerId, gearSlot, materialType, floorName, week, slotAugmented);
-                if (success)
-                {
-                    Log.Information($"Manual log success: {slot} -> {playerName}");
-                    Framework.RunOnFrameworkThread(() =>
-                    {
-                        ChatGui.Print($"[XRP] Logged {slot} -> {playerName}");
-                        _overlayWindow.MarkAsLogged(playerId, slot, playerName);
-                    });
-                    await RefreshPriority();
-                }
-                else
-                {
-                    Log.Error($"Manual log failed: {slot} -> {playerName}");
-                    Framework.RunOnFrameworkThread(() =>
-                    {
-                        ChatGui.PrintError($"[XRP] Failed to log {slot} -> {playerName}");
-                        _overlayWindow.MarkLogFailed(slot, playerName);
-                    });
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Log.Error($"Manual log exception: {ex}");
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Error: {ex.Message}"));
-            }
-        });
-    }
-
-    private void OnLootConfirmed(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber, string? slotAugmented)
-    {
-        Task.Run(async () =>
-        {
-            await LogLootAsync(playerId, gearSlot, materialType, floorName, weekNumber, slotAugmented);
-
-            // Refresh priority after logging
-            await RefreshPriority();
-        });
-    }
-
-    private async Task<bool> LogLootAsync(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber, string? slotAugmented = null)
-    {
-        if (materialType != null)
-        {
-            var result = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                MaterialType = materialType,
-                RecipientPlayerId = playerId,
-                Method = "drop",
-                Notes = "Logged via Dalamud plugin",
-                MarkAugmented = slotAugmented != null,
-                SlotAugmented = slotAugmented,
-            });
-            return result.IsSuccess;
-        }
-
-        if (gearSlot != null)
-        {
-            var result = await _apiClient.CreateLootLogEntryAsync(new LootLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                ItemSlot = gearSlot,
-                RecipientPlayerId = playerId,
-                Method = "drop",
-                Notes = "Logged via Dalamud plugin",
-                MarkAcquired = true,
-            });
-            return result.IsSuccess;
-        }
-
-        return false;
-    }
-
-    private void OnMarkFloorCleared()
-    {
-        if (_cachedPriority == null) return;
-
-        var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-        var playerIds = _cachedPriority.Players.ConvertAll(p => p.Id);
-
-        Task.Run(async () =>
-        {
-            var weekResult = await _apiClient.GetCurrentWeekAsync();
-            var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-
-            var result = await _apiClient.MarkFloorClearedAsync(new MarkFloorClearedRequest
-            {
-                WeekNumber = week,
-                Floor = floorName,
-                PlayerIds = playerIds,
-                Notes = "Logged via Dalamud plugin",
-            });
-
-            if (result.IsSuccess)
-            {
-                Framework.RunOnFrameworkThread(() => _overlayWindow.MarkFloorCleared());
-                Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
-            }
-        });
-    }
-
     private void OnRefreshRequested()
     {
         Task.Run(async () =>
@@ -852,63 +557,6 @@ public sealed class Plugin : IDalamudPlugin
                 _overlayWindow.ShowStatus("Priority data refreshed", new System.Numerics.Vector4(0.133f, 0.773f, 0.369f, 1f));
             }
         });
-    }
-
-    /// <summary>Log loot entries for newly acquired BiS items detected during gear sync.</summary>
-    private async Task LogNewAcquisitionsAsync(string playerId, List<string> slots)
-    {
-        try
-        {
-            var weekResult = await _apiClient.GetCurrentWeekAsync();
-            var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
-            var slotToFloor = BuildSlotToFloorMapping();
-            var logged = 0;
-
-            foreach (var slot in slots)
-            {
-                var floor = slotToFloor.GetValueOrDefault(slot,
-                    _territoryService.CurrentFloorName ?? "M9S");
-                var logResult = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
-                {
-                    WeekNumber = week,
-                    Floor = floor,
-                    ItemSlot = slot,
-                    RecipientPlayerId = playerId,
-                    Method = "purchase",
-                    Notes = "Synced via Dalamud plugin",
-                    MarkAcquired = true,
-                });
-                if (logResult.IsSuccess) logged++;
-            }
-
-            if (logged > 0)
-                ChatGui.Print($"[XRP] Logged {logged} gear acquisition(s).");
-        }
-        catch (System.Exception ex)
-        {
-            Log.Warning($"Failed to log acquisitions: {ex.Message}");
-        }
-    }
-
-    /// <summary>Build a mapping of gear slot → floor name from cached priority data.</summary>
-    private Dictionary<string, string> BuildSlotToFloorMapping()
-    {
-        var mapping = new Dictionary<string, string>();
-        if (_cachedPriority == null) return mapping;
-
-        for (var f = 0; f < _cachedPriority.TierFloors.Count; f++)
-        {
-            var floorKey = $"floor{f + 1}";
-            if (_cachedPriority.Priority.TryGetValue(floorKey, out var floorData))
-            {
-                foreach (var slotKey in floorData.Keys)
-                {
-                    // Use highest floor (later floors override) since BiS drops from later floors
-                    mapping[slotKey] = _cachedPriority.TierFloors[f];
-                }
-            }
-        }
-        return mapping;
     }
 
     private async Task RefreshPriority()
