@@ -54,13 +54,15 @@ public sealed class BrowserAuthService
         var query = context.Request.QueryString;
         var code = query["code"];
         var returnedState = query["state"];
-        await WriteBrowserResponse(context, "You're signed in. Return to the game.");
 
         if (returnedState != pkce.State || string.IsNullOrEmpty(code))
         {
+            await WriteBrowserResponse(context, "Sign-in failed: invalid response. You can close this tab.");
             _log.Error("[BrowserAuth] state mismatch or missing code");
             return ApiResult<string>.Fail(ApiError.Unauthorized);
         }
+
+        await WriteBrowserResponse(context, "You're signed in. Return to the game.");
 
         var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, ct);
         if (result.IsSuccess)
@@ -82,7 +84,7 @@ public sealed class BrowserAuthService
         catch (Exception ex)
         {
             _log.Warning($"[BrowserAuth] Dalamud.Utility.Util.OpenLink failed ({ex.Message}); falling back to Process.Start");
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
         }
     }
 
