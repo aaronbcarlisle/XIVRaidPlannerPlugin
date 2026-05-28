@@ -308,7 +308,7 @@ public class RaidPlannerClient : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(body, JsonOptions);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
             var response = await _httpClient.PostAsync(endpoint, content, ct);
             if (!response.IsSuccessStatusCode)
             {
@@ -327,7 +327,7 @@ public class RaidPlannerClient : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(body, JsonOptions);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
             var response = await _httpClient.PutAsync(endpoint, content, ct);
             if (!response.IsSuccessStatusCode)
             {

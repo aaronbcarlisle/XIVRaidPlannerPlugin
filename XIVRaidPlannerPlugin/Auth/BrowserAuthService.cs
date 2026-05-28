@@ -60,17 +60,26 @@ public sealed class BrowserAuthService
 
         OpenUrl(url);
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(120));
+        // First budget: 120s for the user to authorize in the browser.
+        using var browserTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        browserTimeout.CancelAfter(TimeSpan.FromSeconds(120));
 
         HttpListenerContext context;
         try
         {
-            context = await listener.GetContextAsync().WaitAsync(timeout.Token);
+            context = await listener.GetContextAsync().WaitAsync(browserTimeout.Token);
         }
         catch (OperationCanceledException)
         {
             return ApiResult<string>.Fail(ApiError.Network);
+        }
+
+        // Local helper: writing the browser status page is best-effort.
+        // If the browser closed before we could respond, don't fail the auth flow.
+        async Task TryWriteResponse(string message)
+        {
+            try { await WriteBrowserResponse(context, message); }
+            catch (Exception ex) { _log.Warning($"[BrowserAuth] Failed to send browser response: {ex.Message}"); }
         }
 
         var query = context.Request.QueryString;
@@ -79,22 +88,26 @@ public sealed class BrowserAuthService
 
         if (returnedState != pkce.State || string.IsNullOrEmpty(code))
         {
-            await WriteBrowserResponse(context, "Sign-in failed: invalid response. You can close this tab.");
+            await TryWriteResponse("Sign-in failed: invalid response. You can close this tab.");
             _log.Error("[BrowserAuth] state mismatch or missing code");
             return ApiResult<string>.Fail(ApiError.Unauthorized);
         }
 
-        var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, timeout.Token);
+        // Second budget: 30s for the API exchange. RaidPlannerClient also has its own 15s
+        // HttpClient timeout, but the linked CTS lets the caller cancel via `ct` too.
+        using var exchangeTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        exchangeTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, exchangeTimeout.Token);
         if (result.IsSuccess)
         {
             _config.ApiKey = result.Value!;
             _config.Save();
             _api.UpdateAuth();
-            await WriteBrowserResponse(context, "You're signed in. Return to the game.");
+            await TryWriteResponse("You're signed in. Return to the game.");
         }
         else
         {
-            await WriteBrowserResponse(context, "Sign-in failed: the server rejected the request. You can close this tab and try again from the plugin's config window.");
+            await TryWriteResponse("Sign-in failed: the server rejected the request. You can close this tab and try again from the plugin's config window.");
         }
 
         return result;
