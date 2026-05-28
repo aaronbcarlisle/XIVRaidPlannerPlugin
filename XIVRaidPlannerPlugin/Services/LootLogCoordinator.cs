@@ -69,6 +69,9 @@ public sealed class LootLogCoordinator
 
     public void OnLootObtained(LootEvent loot)
     {
+        if (string.IsNullOrEmpty(_config.ApiKey))
+            return;
+
         var playerId = _partyMatching.GetPlayerIdForName(loot.PlayerName);
         if (playerId == null)
         {
@@ -125,6 +128,9 @@ public sealed class LootLogCoordinator
 
     public void OnItemPurchased(PurchaseEvent purchase)
     {
+        if (string.IsNullOrEmpty(_config.ApiKey))
+            return;
+
         // Only auto-log if the purchased item is BiS
         if (!_itemMapping.HasData || !_itemMapping.IsBisItem(purchase.ItemId))
         {
