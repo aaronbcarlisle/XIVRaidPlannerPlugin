@@ -162,6 +162,17 @@ public sealed class Plugin : IDalamudPlugin
         _lootConfirmWindow.OnConfirm -= _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested -= _gearSync.Sync;
 
+        // Dispose services that own addon listeners FIRST
+        // This prevents SelectYesno/other addon events from firing handlers that touch windows
+        _raidSession.Dispose();
+        _leaveWarning.Dispose();
+
+        // Dispose remaining services
+        _addonHighlight.Dispose();
+        _territoryService.Dispose();
+        _lootDetection.Dispose();
+        _apiClient.Dispose();
+
         // Dispose windows
         WindowSystem.RemoveAllWindows();
         _configWindow.Dispose();
@@ -169,14 +180,6 @@ public sealed class Plugin : IDalamudPlugin
         _lootConfirmWindow.Dispose();
         _leaveWarningWindow.Dispose();
         _bisViewerWindow.Dispose();
-
-        // Dispose services
-        _raidSession.Dispose();
-        _leaveWarning.Dispose();
-        _addonHighlight.Dispose();
-        _territoryService.Dispose();
-        _lootDetection.Dispose();
-        _apiClient.Dispose();
 
         // Remove commands
         CommandManager.RemoveHandler(CommandName);
