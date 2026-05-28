@@ -7,6 +7,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
+using XIVRaidPlannerPlugin.Auth;
 using XIVRaidPlannerPlugin.Services;
 
 namespace XIVRaidPlannerPlugin.Windows;
@@ -23,6 +24,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly IPartyList _partyList;
     private readonly IPlayerState _playerState;
     private readonly PluginThread _thread;
+    private readonly BrowserAuthService _browserAuth;
 
     // UI state
     private string _apiKeyInput = "";
@@ -46,7 +48,7 @@ public class ConfigWindow : Window, IDisposable
     private List<PlayerInfo>? _staticPlayers;
     private bool _isFetchingRoster;
 
-    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState, PluginThread thread)
+    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState, PluginThread thread, BrowserAuthService browserAuth)
         : base("XIV Raid Planner - Settings",
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize)
     {
@@ -56,6 +58,7 @@ public class ConfigWindow : Window, IDisposable
         _partyList = partyList;
         _playerState = playerState;
         _thread = thread;
+        _browserAuth = browserAuth;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -137,124 +140,154 @@ public class ConfigWindow : Window, IDisposable
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Advanced"))
-            {
-                DrawAdvancedTab();
-                ImGui.EndTabItem();
-            }
-
             ImGui.EndTabBar();
         }
     }
 
     private void DrawConnectionTab()
     {
-        ImGui.Text("API Key");
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##apikey", ref _apiKeyInput, 256, ImGuiInputTextFlags.Password))
+        ImGui.TextWrapped("Sign in with your FFXIV Raid Planner account to authorize the plugin. Your browser will open and you'll authenticate with Discord (same as the web app).");
+        ImGui.Spacing();
+
+        if (ImGui.Button("Sign in with browser##browser-auth"))
         {
-            _config.ApiKey = _apiKeyInput;
-            _config.Save();
-            _apiClient.UpdateAuth();
+            _connectionStatus = "Waiting for browser sign-in...";
+            _connectionStatusColor = Theme.Warning;
+            _thread.RunBackground(async () =>
+            {
+                var result = await _browserAuth.SignInAsync();
+                _thread.RunOnUi(() =>
+                {
+                    if (result.IsSuccess)
+                    {
+                        _connectionStatus = "Signed in!";
+                        _connectionStatusColor = Theme.Success;
+                    }
+                    else if (result.Error == ApiError.Unauthorized)
+                    {
+                        _connectionStatus = "Sign-in rejected. Try again or use Advanced to paste a key.";
+                        _connectionStatusColor = Theme.Error;
+                    }
+                    else
+                    {
+                        _connectionStatus = "Sign-in failed or timed out. Check your network or use Advanced.";
+                        _connectionStatusColor = Theme.Error;
+                    }
+                });
+            });
         }
-        ImGui.TextDisabled("Get your API key from the web app (User Menu > API Keys)");
 
         ImGui.Spacing();
-        if (!_isTesting)
-        {
-            if (ImGui.Button("Test Connection"))
-            {
-                _isTesting = true;
-                _connectionStatus = "Testing...";
-                _connectionStatusColor = Theme.Warning;
-
-                Task.Run(async () =>
-                {
-                    var testResult = await _apiClient.TestConnectionAsync();
-                    List<StaticGroupInfo>? groups = null;
-                    if (testResult.IsSuccess)
-                    {
-                        var groupsResult = await _apiClient.GetStaticGroupsAsync();
-                        groups = groupsResult.IsSuccess ? groupsResult.Value : null;
-                    }
-                    _thread.RunOnUi(() =>
-                    {
-                        if (testResult.IsSuccess)
-                        {
-                            _connectionStatus = $"Connected (API v{testResult.Value!.Version})";
-                            _connectionStatusColor = Theme.Success;
-                            _staticGroups = groups;
-                        }
-                        else
-                        {
-                            _connectionStatus = testResult.Error == ApiError.Unauthorized
-                                ? "API key rejected — re-authorize via /xrp config"
-                                : _config.UseCustomUrls
-                                    ? "Connection failed. Check API key and custom URLs."
-                                    : "Connection failed. Check API key.";
-                            _connectionStatusColor = Theme.Error;
-                        }
-                        _isTesting = false;
-                    });
-                });
-            }
-        }
-        else
-        {
-            ImGui.TextDisabled("Testing...");
-        }
 
         if (!string.IsNullOrEmpty(_connectionStatus))
         {
-            ImGui.SameLine();
             ImGui.TextColored(_connectionStatusColor, _connectionStatus);
-        }
-    }
-
-    private void DrawAdvancedTab()
-    {
-        ImGui.TextDisabled("Override default server URLs for development/testing.");
-        ImGui.Spacing();
-
-        if (ImGui.Checkbox("Use custom URLs", ref _useCustomUrls))
-        {
-            _config.UseCustomUrls = _useCustomUrls;
-            _config.Save();
-            _apiClient.UpdateAuth();
+            ImGui.Spacing();
         }
 
-        ImGui.Spacing();
-
-        if (!_useCustomUrls) ImGui.BeginDisabled();
-
-        ImGui.Text("API URL");
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##apiurl", ref _apiUrlInput, 256))
+        if (ImGui.CollapsingHeader("Advanced (manual API key / custom server)##advanced"))
         {
-            if (string.IsNullOrWhiteSpace(_apiUrlInput) || Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
+            ImGui.Spacing();
+
+            ImGui.Text("API Key");
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.InputText("##apikey", ref _apiKeyInput, 256, ImGuiInputTextFlags.Password))
             {
-                _config.ApiBaseUrl = _apiUrlInput;
+                _config.ApiKey = _apiKeyInput;
                 _config.Save();
                 _apiClient.UpdateAuth();
             }
-        }
-        if (!string.IsNullOrWhiteSpace(_apiUrlInput) && !Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
-            ImGui.TextColored(Theme.Error, "Invalid URL. Use an absolute URL, e.g. https://localhost:5000");
-        else if (!_useCustomUrls)
-            ImGui.TextDisabled($"Default: {Configuration.DefaultApiBaseUrl}");
+            ImGui.TextDisabled("Get your API key from the web app (User Menu > API Keys)");
 
-        ImGui.Spacing();
-        ImGui.Text("Frontend URL");
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##frontendurl", ref _frontendUrlInput, 256))
-        {
-            _config.FrontendBaseUrl = _frontendUrlInput;
-            _config.Save();
-        }
-        if (!_useCustomUrls)
-            ImGui.TextDisabled($"Default: {Configuration.DefaultFrontendBaseUrl}");
+            ImGui.Spacing();
+            if (!_isTesting)
+            {
+                if (ImGui.Button("Test Connection"))
+                {
+                    _isTesting = true;
+                    _connectionStatus = "Testing...";
+                    _connectionStatusColor = Theme.Warning;
 
-        if (!_useCustomUrls) ImGui.EndDisabled();
+                    Task.Run(async () =>
+                    {
+                        var testResult = await _apiClient.TestConnectionAsync();
+                        List<StaticGroupInfo>? groups = null;
+                        if (testResult.IsSuccess)
+                        {
+                            var groupsResult = await _apiClient.GetStaticGroupsAsync();
+                            groups = groupsResult.IsSuccess ? groupsResult.Value : null;
+                        }
+                        _thread.RunOnUi(() =>
+                        {
+                            if (testResult.IsSuccess)
+                            {
+                                _connectionStatus = $"Connected (API v{testResult.Value!.Version})";
+                                _connectionStatusColor = Theme.Success;
+                                _staticGroups = groups;
+                            }
+                            else
+                            {
+                                _connectionStatus = testResult.Error == ApiError.Unauthorized
+                                    ? "API key rejected — re-authorize via /xrp config"
+                                    : _config.UseCustomUrls
+                                        ? "Connection failed. Check API key and custom URLs."
+                                        : "Connection failed. Check API key.";
+                                _connectionStatusColor = Theme.Error;
+                            }
+                            _isTesting = false;
+                        });
+                    });
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("Testing...");
+            }
+
+            ImGui.Spacing();
+            ImGui.TextDisabled("Override default server URLs for development/testing.");
+            ImGui.Spacing();
+
+            if (ImGui.Checkbox("Use custom URLs", ref _useCustomUrls))
+            {
+                _config.UseCustomUrls = _useCustomUrls;
+                _config.Save();
+                _apiClient.UpdateAuth();
+            }
+
+            ImGui.Spacing();
+
+            if (!_useCustomUrls) ImGui.BeginDisabled();
+
+            ImGui.Text("API URL");
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.InputText("##apiurl", ref _apiUrlInput, 256))
+            {
+                if (string.IsNullOrWhiteSpace(_apiUrlInput) || Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
+                {
+                    _config.ApiBaseUrl = _apiUrlInput;
+                    _config.Save();
+                    _apiClient.UpdateAuth();
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(_apiUrlInput) && !Uri.TryCreate(_apiUrlInput, UriKind.Absolute, out _))
+                ImGui.TextColored(Theme.Error, "Invalid URL. Use an absolute URL, e.g. https://localhost:5000");
+            else if (!_useCustomUrls)
+                ImGui.TextDisabled($"Default: {Configuration.DefaultApiBaseUrl}");
+
+            ImGui.Spacing();
+            ImGui.Text("Frontend URL");
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.InputText("##frontendurl", ref _frontendUrlInput, 256))
+            {
+                _config.FrontendBaseUrl = _frontendUrlInput;
+                _config.Save();
+            }
+            if (!_useCustomUrls)
+                ImGui.TextDisabled($"Default: {Configuration.DefaultFrontendBaseUrl}");
+
+            if (!_useCustomUrls) ImGui.EndDisabled();
+        }
     }
 
     private void DrawStaticTab()

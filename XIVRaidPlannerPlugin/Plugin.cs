@@ -5,6 +5,7 @@ using Dalamud.Plugin;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
+using XIVRaidPlannerPlugin.Auth;
 using XIVRaidPlannerPlugin.Services;
 using XIVRaidPlannerPlugin.Windows;
 
@@ -38,6 +39,7 @@ public sealed class Plugin : IDalamudPlugin
     // Services
     private readonly RaidPlannerClient _apiClient;
     private readonly PluginThread _thread;
+    private readonly BrowserAuthService _browserAuth;
     private readonly TerritoryService _territoryService;
     private readonly PartyMatchingService _partyMatching;
     private readonly LootDetectionService _lootDetection;
@@ -65,6 +67,7 @@ public sealed class Plugin : IDalamudPlugin
         // Initialize services
         _apiClient = new RaidPlannerClient(Configuration, Log);
         _thread = new PluginThread(Framework, Log);
+        _browserAuth = new BrowserAuthService(Configuration, _apiClient, Log);
         _territoryService = new TerritoryService(ClientState, DataManager, Log);
         _partyMatching = new PartyMatchingService(PartyList, Configuration, Log);
         _lootDetection = new LootDetectionService(ChatGui, DataManager, Log);
@@ -76,7 +79,7 @@ public sealed class Plugin : IDalamudPlugin
         _addonHighlight.Register();
 
         // Initialize windows
-        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState, _thread);
+        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState, _thread, _browserAuth);
         _overlayWindow = new PriorityOverlayWindow(Configuration, TextureProvider);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
