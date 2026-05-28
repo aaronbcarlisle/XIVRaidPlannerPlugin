@@ -78,7 +78,7 @@ public sealed class Plugin : IDalamudPlugin
         _addonHighlight.Register();
 
         // Initialize windows
-        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState, _thread, _browserAuth);
+        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState, _thread, _browserAuth, _bisData);
         _overlayWindow = new PriorityOverlayWindow(Configuration, TextureProvider);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
@@ -131,11 +131,14 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnRefresh += OnRefreshRequested;
         _lootConfirmWindow.OnConfirm += _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested += _gearSync.Sync;
+        // When the local character's player-link changes, drop the cached BiS gear and re-fetch
+        // so the BiS window doesn't keep showing the previous player's data.
+        _partyMatching.OnOverrideChanged += OnLocalPlayerLinkChanged;
 
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle priority overlay. '/xrp bis' for BiS viewer. '/xrp sync' to sync gear. '/xrp config' for settings.",
+            HelpMessage = "Toggle BiS viewer. '/xrp priority' for priority overlay. '/xrp sync' to sync gear. '/xrp config' for settings.",
         });
 
         // Register UI drawing
@@ -199,6 +202,10 @@ public sealed class Plugin : IDalamudPlugin
             case "settings":
                 ToggleConfigUi();
                 break;
+            case "priority":
+            case "overlay":
+                ToggleOverlay();
+                break;
             case "bis":
                 ToggleBisViewer();
                 break;
@@ -206,7 +213,9 @@ public sealed class Plugin : IDalamudPlugin
                 _gearSync.Sync();
                 break;
             default:
-                ToggleOverlay();
+                // Bare /xrp opens BiS — useful in town between pulls.
+                // Priority overlay still auto-opens via ShowOverlayOnEntry/OnDutyComplete/OnLootWindow.
+                ToggleBisViewer();
                 break;
         }
     }
@@ -225,6 +234,21 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
         _bisViewerWindow.Toggle();
+    }
+
+    private void OnLocalPlayerLinkChanged(string characterName, string? newPlayerId)
+    {
+        var localName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+        if (string.IsNullOrEmpty(localName) || localName != characterName) return;
+
+        var oldPlayerId = _bisData.CurrentPlayerGear?.PlayerId;
+        if (oldPlayerId != null)
+            _bisData.InvalidatePlayer(oldPlayerId);
+
+        // If the override was cleared (None), don't auto-fetch — let the user open BiS to retry.
+        if (newPlayerId == null) return;
+
+        _thread.RunBackground(async () => await _bisData.FetchCurrentPlayerGearAsync(localName));
     }
 
     private void OnRefreshRequested()

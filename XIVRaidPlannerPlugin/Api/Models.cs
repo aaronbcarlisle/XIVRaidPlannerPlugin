@@ -170,3 +170,13 @@ public class PluginAuthExchangeResponse
 {
     [JsonPropertyName("apiKey")] public string ApiKey { get; set; } = string.Empty;
 }
+
+// ==================== Snapshot Player (for auto-detect) ====================
+
+/// <summary>Subset of the snapshot player record — only the fields needed to map the signed-in user to their player card.</summary>
+public class SnapshotPlayerSummary
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+    [JsonPropertyName("userId")] public string? UserId { get; set; }
+}

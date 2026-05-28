@@ -26,6 +26,13 @@ public sealed class PluginThread
         });
     }
 
-    /// <summary>Marshal an action onto the framework (game) thread.</summary>
+    /// <summary>Marshal an action onto the framework (game) thread (fire-and-forget).</summary>
     public void RunOnUi(Action action) => _framework.RunOnFrameworkThread(action);
+
+    /// <summary>
+    /// Marshal an action onto the framework thread and return a Task that completes when
+    /// the action has run. Use this when subsequent background work depends on UI-thread
+    /// state writes (e.g., Configuration field assignments) having already taken effect.
+    /// </summary>
+    public Task RunOnUiAsync(Action action) => _framework.RunOnFrameworkThread(action);
 }

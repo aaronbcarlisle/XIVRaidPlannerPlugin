@@ -54,8 +54,9 @@ The built plugin will be in `XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlug
 
 | Command | Description |
 |---------|-------------|
-| `/xrp` | Toggle the priority overlay |
+| `/xrp` | Toggle the BiS gear viewer (default) |
 | `/xrp bis` | Toggle the BiS gear viewer |
+| `/xrp priority` | Toggle the priority overlay |
 | `/xrp sync` | Sync equipped gear to the web app |
 | `/xrp config` | Open the configuration window |
 

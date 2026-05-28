@@ -25,6 +25,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly IPlayerState _playerState;
     private readonly PluginThread _thread;
     private readonly BrowserAuthService _browserAuth;
+    private readonly BiSDataService _bisData;
 
     // UI state
     private string _apiKeyInput = "";
@@ -47,8 +48,11 @@ public class ConfigWindow : Window, IDisposable
     // Players tab state
     private List<PlayerInfo>? _staticPlayers;
     private bool _isFetchingRoster;
+    private string? _rosterFetchError;
+    private string? _autoDetectStatus;
+    private Vector4 _autoDetectStatusColor = Theme.White;
 
-    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState, PluginThread thread, BrowserAuthService browserAuth)
+    public ConfigWindow(Configuration config, RaidPlannerClient apiClient, PartyMatchingService partyMatching, IPartyList partyList, IPlayerState playerState, PluginThread thread, BrowserAuthService browserAuth, BiSDataService bisData)
         : base("XIV Raid Planner - Settings",
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize)
     {
@@ -59,6 +63,7 @@ public class ConfigWindow : Window, IDisposable
         _playerState = playerState;
         _thread = thread;
         _browserAuth = browserAuth;
+        _bisData = bisData;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -78,7 +83,10 @@ public class ConfigWindow : Window, IDisposable
 
     public override void Draw()
     {
-        // Auto-fetch statics on first draw if credentials are already configured
+        // Auto-fetch statics on first draw if credentials are already configured.
+        // Mirrors the sign-in flow: test connection, then run the full auto-config
+        // chain (statics → tier list → roster → auto-detect → BiS) so plugin reloads
+        // restore full state without manual clicks.
         if (!_autoConnectAttempted && !_isTesting
             && !string.IsNullOrEmpty(_config.ApiKey))
         {
@@ -90,20 +98,17 @@ public class ConfigWindow : Window, IDisposable
             _thread.RunBackground(async () =>
             {
                 var testResult = await _apiClient.TestConnectionAsync();
-                List<StaticGroupInfo>? groups = null;
-                if (testResult.IsSuccess)
-                {
-                    var groupsResult = await _apiClient.GetStaticGroupsAsync();
-                    groups = groupsResult.IsSuccess ? groupsResult.Value : null;
-                }
-                // Marshal UI state updates back to the framework thread
-                _thread.RunOnUi(() =>
+                await _thread.RunOnUiAsync(() =>
                 {
                     if (testResult.IsSuccess)
                     {
                         _connectionStatus = $"Connected (API v{testResult.Value!.Version})";
                         _connectionStatusColor = Theme.Success;
-                        _staticGroups = groups;
+                    }
+                    else if (testResult.Error == ApiError.Unauthorized)
+                    {
+                        _connectionStatus = "API key rejected. Sign in again from the Connection tab.";
+                        _connectionStatusColor = Theme.Error;
                     }
                     else
                     {
@@ -111,6 +116,11 @@ public class ConfigWindow : Window, IDisposable
                     }
                     _isTesting = false;
                 });
+
+                // Only chain the full setup if auth succeeded. PostSignInAutoConfigAsync
+                // also fetches statics, so we don't duplicate that work here.
+                if (testResult.IsSuccess)
+                    await PostSignInAutoConfigAsync();
             });
         }
 
@@ -174,6 +184,10 @@ public class ConfigWindow : Window, IDisposable
                         _connectionStatusColor = Theme.Error;
                     }
                 });
+
+                // On success, fetch statics and (if exactly one) chain the full auto-config.
+                if (result.IsSuccess)
+                    await PostSignInAutoConfigAsync();
             });
         }
 
@@ -343,10 +357,15 @@ public class ConfigWindow : Window, IDisposable
                 _config.DefaultGroupName = _staticGroups[_selectedGroupIndex].Name;
                 _config.DefaultGroupShareCode = _staticGroups[_selectedGroupIndex].ShareCode;
                 _config.DefaultTierId = string.Empty;
+                _config.DefaultTierName = string.Empty;
                 _tiers = null;
                 _selectedTierIndex = -1;
+                _staticPlayers = null; // Force re-fetch — old roster belongs to the previous static.
                 _config.Save();
                 _apiClient.InvalidateResolvedTier();
+                // Force=true: overrides are character-keyed (not static-scoped), so the prior
+                // value may belong to a different static and must be replaced.
+                _thread.RunBackground(async () => await ReloadRosterAndAutoDetectAsync(force: true));
             }
         }
 
@@ -426,6 +445,7 @@ public class ConfigWindow : Window, IDisposable
                     _config.DefaultTierId = string.Empty;
                     _config.DefaultTierName = string.Empty;
                     _config.Save();
+                    _apiClient.InvalidateResolvedTier();
                 }
                 else if (_selectedTierIndex > 0 && _selectedTierIndex <= _tiers.Count)
                 {
@@ -434,6 +454,9 @@ public class ConfigWindow : Window, IDisposable
                     _config.DefaultTierName = tier.TierId;
                     _config.Save();
                 }
+                _staticPlayers = null; // Roster is per-snapshot — old data is stale on tier change.
+                // Force=true: player IDs are per-snapshot, so the prior override is now stale.
+                _thread.RunBackground(async () => await ReloadRosterAndAutoDetectAsync(force: true));
             }
         }
     }
@@ -450,24 +473,25 @@ public class ConfigWindow : Window, IDisposable
             {
                 if (ImGui.Button("Load Static Roster"))
                 {
-                    _isFetchingRoster = true;
-                    _thread.RunBackground(async () =>
-                    {
-                        var priorityResult = await _apiClient.GetPriorityAsync();
-                        _thread.RunOnUi(() =>
-                        {
-                            if (priorityResult.IsSuccess)
-                                _staticPlayers = priorityResult.Value!.Players;
-                            _isFetchingRoster = false;
-                        });
-                    });
+                    _thread.RunBackground(async () => await ReloadRosterAndAutoDetectAsync(force: false));
                 }
                 ImGui.SameLine();
-                ImGui.TextDisabled("Requires connection + static/tier configured.");
+                ImGui.TextDisabled("Requires connection + static configured.");
             }
             else
             {
                 ImGui.TextDisabled("Loading...");
+            }
+
+            if (!string.IsNullOrEmpty(_rosterFetchError))
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(Theme.Error, _rosterFetchError);
+            }
+            if (!string.IsNullOrEmpty(_autoDetectStatus))
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(_autoDetectStatusColor, _autoDetectStatus);
             }
 
             if (_staticPlayers == null || _staticPlayers.Count == 0)
@@ -526,14 +550,11 @@ public class ConfigWindow : Window, IDisposable
                 ImGui.SetNextItemWidth(200);
                 if (ImGui.Combo("##assign", ref selectedIndex, comboLabels))
                 {
+                    // Route through PartyMatchingService so OnOverrideChanged fires (BiS window refresh, etc.)
                     if (selectedIndex == 0)
-                        _config.PlayerNameOverrides.Remove(partyName);
+                        _partyMatching.RemoveOverride(partyName, _staticPlayers);
                     else
-                        _config.PlayerNameOverrides[partyName] = _staticPlayers[selectedIndex - 1].Id;
-                    _config.Save();
-
-                    // Re-run matching with updated overrides
-                    _partyMatching.MatchParty(_staticPlayers);
+                        _partyMatching.SetOverride(partyName, _staticPlayers[selectedIndex - 1].Id, _staticPlayers);
                 }
 
                 ImGui.PopID();
@@ -568,27 +589,229 @@ public class ConfigWindow : Window, IDisposable
             }
 
             if (keyToRemove != null)
-            {
-                _config.PlayerNameOverrides.Remove(keyToRemove);
-                _config.Save();
-            }
+                _partyMatching.RemoveOverride(keyToRemove, _staticPlayers);
         }
 
         ImGui.Spacing();
         if (ImGui.Button("Refresh"))
         {
-            _isFetchingRoster = true;
+            _thread.RunBackground(async () => await ReloadRosterAndAutoDetectAsync(force: false));
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Auto-detect my player"))
+        {
+            _autoDetectStatus = null;
             _thread.RunBackground(async () =>
             {
-                var priorityResult = await _apiClient.GetPriorityAsync();
-                _thread.RunOnUi(() =>
-                {
-                    if (priorityResult.IsSuccess)
-                        _staticPlayers = priorityResult.Value!.Players;
-                    _isFetchingRoster = false;
-                });
+                if (_staticPlayers != null)
+                    await TryAutoDetectPlayerAsync(_staticPlayers, force: true);
             });
         }
+
+        if (!string.IsNullOrEmpty(_rosterFetchError) && _staticPlayers != null && _staticPlayers.Count > 0)
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(Theme.Error, _rosterFetchError);
+        }
+        if (!string.IsNullOrEmpty(_autoDetectStatus))
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(_autoDetectStatusColor, _autoDetectStatus);
+        }
+    }
+
+    /// <summary>
+    /// Full post-auth chain — runs after both fresh sign-in and plugin-reload auto-connect.
+    /// Fetches statics, picks the right one (prefer existing DefaultGroupId, else
+    /// auto-pick when exactly one accessible), prefetches the tier list, loads the
+    /// roster, runs auto-detect, and loads BiS gear data — so every tab and vendor
+    /// highlighting work without further clicks. If no group can be picked
+    /// automatically, surfaces the list and lets the user choose; the Static dropdown
+    /// handler then triggers the same chain via its own ReloadRosterAndAutoDetectAsync.
+    /// </summary>
+    private async Task PostSignInAutoConfigAsync()
+    {
+        var groupsResult = await _apiClient.GetStaticGroupsAsync();
+        if (!groupsResult.IsSuccess)
+        {
+            await _thread.RunOnUiAsync(() =>
+            {
+                _connectionStatus = "Signed in, but couldn't load your statics. Try again from Test Connection.";
+                _connectionStatusColor = Theme.Warning;
+            });
+            return;
+        }
+
+        var groups = groupsResult.Value!;
+        await _thread.RunOnUiAsync(() =>
+        {
+            _staticGroups = groups;
+            // Prevent the on-Draw auto-connect path from also firing GetStaticGroupsAsync.
+            _autoConnectAttempted = true;
+        });
+
+        // Pick the static to use:
+        //   1. If DefaultGroupId from previous session matches an accessible group, use it.
+        //   2. Otherwise, if exactly one accessible group, auto-pick it.
+        //   3. Otherwise, let the user pick from the dropdown.
+        StaticGroupInfo? selected = null;
+        if (!string.IsNullOrEmpty(_config.DefaultGroupId))
+            selected = groups.Find(g => g.Id == _config.DefaultGroupId);
+        if (selected == null && groups.Count == 1)
+            selected = groups[0];
+        if (selected == null) return;
+
+        var groupId = selected.Id;
+        var groupName = selected.Name;
+        var groupShareCode = selected.ShareCode;
+        var groupIndex = groups.IndexOf(selected);
+        var reusingExistingGroup = _config.DefaultGroupId == groupId;
+
+        // Await the config write so the subsequent API call sees the new DefaultGroupId.
+        await _thread.RunOnUiAsync(() =>
+        {
+            _config.DefaultGroupId = groupId;
+            _config.DefaultGroupName = groupName;
+            _config.DefaultGroupShareCode = groupShareCode;
+            // Preserve a previously chosen tier when reusing the existing group;
+            // otherwise reset to Auto so the backend picks the active tier.
+            if (!reusingExistingGroup)
+            {
+                _config.DefaultTierId = string.Empty;
+                _config.DefaultTierName = string.Empty;
+            }
+            _config.Save();
+            _selectedGroupIndex = groupIndex;
+            _selectedTierIndex = -1;
+            _tiers = null;
+            if (!reusingExistingGroup)
+                _apiClient.InvalidateResolvedTier();
+        });
+
+        // Prefetch the tier list so the Static tab is populated when first opened.
+        // Runs in parallel with the roster/auto-detect chain — they don't depend on
+        // the tier list (priority uses Auto-resolution server-side).
+        var tiersTask = _apiClient.GetTiersAsync(groupId);
+
+        await ReloadRosterAndAutoDetectAsync(force: false);
+
+        var tiersResult = await tiersTask;
+        await _thread.RunOnUiAsync(() =>
+        {
+            _tiers = tiersResult.IsSuccess ? tiersResult.Value : new List<TierInfo>();
+            _isFetchingTiers = false;
+        });
+
+        // Ensure BiS data is loaded so vendor highlighting works without the user
+        // having to open the BiS window first. Auto-detect only re-fetches BiS when
+        // the override actually CHANGES — if a stale-but-correct override was already
+        // present, OnOverrideChanged doesn't fire, so we load BiS explicitly here.
+        var charName = _playerState.IsLoaded ? _playerState.CharacterName?.ToString() : null;
+        if (!string.IsNullOrEmpty(charName) && _bisData.CurrentPlayerGear == null)
+            await _bisData.FetchCurrentPlayerGearAsync(charName);
+    }
+
+    /// <summary>
+    /// Fetch the roster for the configured static/tier, then run auto-detect. Centralizes the
+    /// "context changed → re-link my player" chain triggered from Load/Refresh and from the
+    /// Static and Tier dropdown changes. Set <paramref name="force"/> to overwrite an existing
+    /// override (use for context changes; leave false for initial loads that should respect manual links).
+    /// </summary>
+    private async Task ReloadRosterAndAutoDetectAsync(bool force)
+    {
+        _thread.RunOnUi(() =>
+        {
+            _isFetchingRoster = true;
+            _rosterFetchError = null;
+            _autoDetectStatus = null;
+        });
+
+        var priorityResult = await _apiClient.GetPriorityAsync();
+        _thread.RunOnUi(() =>
+        {
+            if (priorityResult.IsSuccess)
+            {
+                _staticPlayers = priorityResult.Value!.Players;
+                if (_staticPlayers.Count == 0)
+                    _rosterFetchError = "Tier loaded but has no players. Add players in the web app, or pick a different tier in the Static tab.";
+            }
+            else
+            {
+                _rosterFetchError = priorityResult.Error switch
+                {
+                    ApiError.NotFound => "Couldn't resolve a tier for the selected static. Pick a specific tier in the Static tab, or check that one is marked active in the web app.",
+                    ApiError.Unauthorized => "Not signed in or API key was revoked. Re-authorize in the Connection tab.",
+                    ApiError.Network => "Network error while fetching the roster. Check your connection.",
+                    ApiError.Server => "Server error while fetching the roster. Try again in a moment.",
+                    _ => "Failed to load static roster. See plugin log for details.",
+                };
+            }
+            _isFetchingRoster = false;
+        });
+
+        if (priorityResult.IsSuccess && priorityResult.Value!.Players.Count > 0)
+            await TryAutoDetectPlayerAsync(priorityResult.Value!.Players, force: force);
+    }
+
+    /// <summary>
+    /// Look up the signed-in user's player card in the active tier and auto-populate
+    /// the character→player override. Silent on no match (user may not be a member yet);
+    /// shows a status when a link is created or when manual disambiguation is needed.
+    /// Set <paramref name="force"/> to overwrite an existing override.
+    /// </summary>
+    private async Task TryAutoDetectPlayerAsync(List<PlayerInfo> roster, bool force = false)
+    {
+        var characterName = _playerState.IsLoaded ? _playerState.CharacterName?.ToString() : null;
+        if (string.IsNullOrEmpty(characterName))
+        {
+            _thread.RunOnUi(() =>
+            {
+                _autoDetectStatus = "Character not loaded — can't auto-detect.";
+                _autoDetectStatusColor = Theme.Warning;
+            });
+            return;
+        }
+
+        if (!force && _config.PlayerNameOverrides.ContainsKey(characterName))
+            return; // Respect existing manual link.
+
+        var meResult = await _apiClient.GetCurrentUserAsync();
+        if (!meResult.IsSuccess)
+        {
+            _thread.RunOnUi(() =>
+            {
+                _autoDetectStatus = "Couldn't fetch your account info — try Refresh.";
+                _autoDetectStatusColor = Theme.Warning;
+            });
+            return;
+        }
+
+        var playersResult = await _apiClient.GetSnapshotPlayersAsync();
+        if (!playersResult.IsSuccess) return; // Already surfaced upstream; stay quiet here.
+
+        var matches = playersResult.Value!.FindAll(p => p.UserId == meResult.Value!.Id);
+        _thread.RunOnUi(() =>
+        {
+            switch (matches.Count)
+            {
+                case 1:
+                    _partyMatching.SetOverride(characterName, matches[0].Id, roster);
+                    _autoDetectStatus = $"Auto-linked {characterName} -> {matches[0].Name}";
+                    _autoDetectStatusColor = Theme.Success;
+                    break;
+                case 0:
+                    if (force)
+                    {
+                        _autoDetectStatus = "No player in this static is claimed by your account. Ask the owner to assign you, or pick manually below.";
+                        _autoDetectStatusColor = Theme.Warning;
+                    }
+                    break;
+                default:
+                    _autoDetectStatus = $"Your account claims {matches.Count} players in this static. Pick the right one manually below.";
+                    _autoDetectStatusColor = Theme.Warning;
+                    break;
+            }
+        });
     }
 
     private void DrawSettingsTab()

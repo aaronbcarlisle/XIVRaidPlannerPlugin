@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
@@ -71,11 +72,28 @@ public class PartyMatchingService
         return null;
     }
 
-    /// <summary>Add a manual override and re-match.</summary>
+    /// <summary>
+    /// Fires when a manual override is added, changed, or removed.
+    /// Args: (characterName, newPlayerId-or-null-on-remove).
+    /// Subscribers (e.g., BiSDataService re-fetch) must filter on whether the change affects them.
+    /// </summary>
+    public event Action<string, string?>? OnOverrideChanged;
+
+    /// <summary>Add or change a manual override and re-match.</summary>
     public void SetOverride(string characterName, string playerId, List<PlayerInfo> plannerPlayers)
     {
         _config.PlayerNameOverrides[characterName] = playerId;
         _config.Save();
         MatchParty(plannerPlayers);
+        OnOverrideChanged?.Invoke(characterName, playerId);
+    }
+
+    /// <summary>Remove a manual override and re-match.</summary>
+    public void RemoveOverride(string characterName, List<PlayerInfo> plannerPlayers)
+    {
+        if (!_config.PlayerNameOverrides.Remove(characterName)) return;
+        _config.Save();
+        MatchParty(plannerPlayers);
+        OnOverrideChanged?.Invoke(characterName, null);
     }
 }
