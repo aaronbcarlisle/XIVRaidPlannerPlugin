@@ -43,9 +43,6 @@ public class PriorityOverlayWindow : Window, IDisposable
 
     private static Dictionary<string, string[]> MaterialSlotOptions => GameConstants.MaterialSlotOptions;
 
-    private static readonly Vector4 ColorAccent = Theme.Accent;
-    private static readonly Vector4 ColorSuccess = Theme.Success;
-    private static readonly Vector4 ColorError = Theme.Error;
     private static readonly Vector4 ColorMuted = new(0.4f, 0.4f, 0.45f, 1f);
     private static readonly Vector4 ColorLink = new(0.4f, 0.7f, 1.0f, 1f);
 
@@ -167,20 +164,20 @@ public class PriorityOverlayWindow : Window, IDisposable
     public void MarkAsLogged(string playerId, string slot, string playerName)
     {
         _loggedEntries.Add($"{playerId}|{slot}");
-        ShowStatus($"Logged {FormatDropName(slot)} -> {playerName}", ColorSuccess);
+        ShowStatus($"Logged {FormatDropName(slot)} -> {playerName}", Theme.Success);
     }
 
     /// <summary>Show a log failure message.</summary>
     public void MarkLogFailed(string slot, string playerName)
     {
-        ShowStatus($"Failed to log {FormatDropName(slot)} -> {playerName}", ColorError);
+        ShowStatus($"Failed to log {FormatDropName(slot)} -> {playerName}", Theme.Error);
     }
 
     /// <summary>Mark the floor as successfully cleared.</summary>
     public void MarkFloorCleared()
     {
         _floorCleared = true;
-        ShowStatus($"{_floorName} marked as cleared!", ColorSuccess);
+        ShowStatus($"{_floorName} marked as cleared!", Theme.Success);
     }
 
     public void ShowStatus(string message, Vector4 color)
@@ -397,7 +394,7 @@ public class PriorityOverlayWindow : Window, IDisposable
 
         if (ImGui.BeginPopup("material_slot_select"))
         {
-            ImGui.TextColored(ColorAccent, $"{FormatDropName(_pendingMaterialSlot)} -> {_pendingMaterialPlayerName}");
+            ImGui.TextColored(Theme.Accent, $"{FormatDropName(_pendingMaterialSlot)} -> {_pendingMaterialPlayerName}");
             ImGui.Separator();
             ImGui.TextDisabled("Augment which slot?");
 
@@ -445,7 +442,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         {
             if (_confirmAction == ConfirmAction.LogLoot)
             {
-                ImGui.TextColored(ColorAccent, $"Log {FormatDropName(_confirmSlot)} \u2192 {_confirmPlayerName}?");
+                ImGui.TextColored(Theme.Accent, $"Log {FormatDropName(_confirmSlot)} \u2192 {_confirmPlayerName}?");
                 ImGui.Separator();
                 ImGui.Spacing();
                 ImGui.TextWrapped($"This will record {_confirmPlayerName} received {FormatDropName(_confirmSlot)} from {_floorName}.");
@@ -457,7 +454,7 @@ public class PriorityOverlayWindow : Window, IDisposable
             }
             else if (_confirmAction == ConfirmAction.ClearFloor)
             {
-                ImGui.TextColored(ColorAccent, $"Mark {_floorName} as cleared?");
+                ImGui.TextColored(Theme.Accent, $"Mark {_floorName} as cleared?");
                 ImGui.Separator();
                 ImGui.Spacing();
                 ImGui.TextWrapped($"This will mark {_floorName} as cleared for all 8 players. Everyone will receive books for this week.");
@@ -498,7 +495,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         // Bottom bar: floor cleared + refresh
         if (_floorCleared)
         {
-            ImGui.TextColored(ColorSuccess, $"{_floorName} Cleared");
+            ImGui.TextColored(Theme.Success, $"{_floorName} Cleared");
         }
         else
         {
@@ -515,7 +512,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         if (ImGui.SmallButton("Refresh"))
         {
             OnRefresh?.Invoke();
-            ShowStatus("Refreshing priority data...", ColorAccent);
+            ShowStatus("Refreshing priority data...", Theme.Accent);
         }
 
         // Ctrl+Click hint

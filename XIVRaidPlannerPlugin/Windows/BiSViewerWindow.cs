@@ -26,7 +26,7 @@ public class BiSViewerWindow : Window, IDisposable
     private static readonly Vector4 ColorTextPrimary = new(0.941f, 0.941f, 0.961f, 1f);
     private static readonly Vector4 ColorTextSecondary = new(0.631f, 0.631f, 0.667f, 1f);
     private static readonly Vector4 ColorTextMuted = new(0.322f, 0.322f, 0.357f, 1f);
-    private static readonly Vector4 ColorAccent = new(0.078f, 0.722f, 0.651f, 1f);
+
 
     private static readonly Dictionary<string, Vector4> EquippedSourceColors = new()
     {
@@ -171,13 +171,13 @@ public class BiSViewerWindow : Window, IDisposable
         if (jobIcon != null) { var w = jobIcon.GetWrapOrDefault(); if (w != null) { ImGui.Image(w.Handle, new Vector2(24, 24)); ImGui.SameLine(); } }
 
         var ctrl = ImGui.GetIO().KeyCtrl;
-        ImGui.TextColored(ctrl ? ColorAccent : ColorTextPrimary, $"{gear.PlayerName} ({gear.Job})");
+        ImGui.TextColored(ctrl ? Theme.Accent : ColorTextPrimary, $"{gear.PlayerName} ({gear.Job})");
         if (ImGui.IsItemClicked() && ctrl) OpenPlayerInBrowser(gear.PlayerId);
 
         if (gear.BisLink != null)
         {
             ImGui.SameLine(); ImGui.TextColored(ColorTextMuted, " | "); ImGui.SameLine();
-            ImGui.TextColored(ctrl ? ColorAccent : ColorGearTome, "BiS");
+            ImGui.TextColored(ctrl ? Theme.Accent : ColorGearTome, "BiS");
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Ctrl+Click to open BiS link");
             if (ImGui.IsItemClicked() && ctrl) OpenBisLinkInBrowser(gear.BisLink);
         }
