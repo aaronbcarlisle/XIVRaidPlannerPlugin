@@ -109,13 +109,17 @@ public class BiSDataService
                 return;
             }
 
-            var gear = await _apiClient.GetPlayerGearAsync(playerId);
-            if (gear == null)
+            var gearResult = await _apiClient.GetPlayerGearAsync(playerId);
+            if (!gearResult.IsSuccess)
             {
-                _log.Warning($"[BiSData] API returned null for player {playerId}");
-                LastError = "Failed to fetch gear data";
+                _log.Warning($"[BiSData] API error for player {playerId}: {gearResult.Error}");
+                LastError = gearResult.Error == ApiError.Unauthorized
+                    ? "API key rejected — re-authorize via /xrp config"
+                    : "Failed to fetch gear data";
                 return;
             }
+
+            var gear = gearResult.Value!;
 
             // Cache the result
             _gearCache[playerId] = gear;

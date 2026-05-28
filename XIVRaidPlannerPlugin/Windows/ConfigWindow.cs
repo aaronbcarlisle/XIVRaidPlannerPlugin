@@ -84,14 +84,19 @@ public class ConfigWindow : Window, IDisposable
 
             Task.Run(async () =>
             {
-                var result = await _apiClient.TestConnectionAsync();
-                var groups = result != null ? await _apiClient.GetStaticGroupsAsync() : null;
+                var testResult = await _apiClient.TestConnectionAsync();
+                List<StaticGroupInfo>? groups = null;
+                if (testResult.IsSuccess)
+                {
+                    var groupsResult = await _apiClient.GetStaticGroupsAsync();
+                    groups = groupsResult.IsSuccess ? groupsResult.Value : null;
+                }
                 // Marshal UI state updates back to the framework thread
                 Plugin.Framework.RunOnFrameworkThread(() =>
                 {
-                    if (result != null)
+                    if (testResult.IsSuccess)
                     {
-                        _connectionStatus = $"Connected (API v{result.Version})";
+                        _connectionStatus = $"Connected (API v{testResult.Value!.Version})";
                         _connectionStatusColor = Theme.Success;
                         _staticGroups = groups;
                     }
@@ -163,21 +168,28 @@ public class ConfigWindow : Window, IDisposable
 
                 Task.Run(async () =>
                 {
-                    var result = await _apiClient.TestConnectionAsync();
-                    var groups = result != null ? await _apiClient.GetStaticGroupsAsync() : null;
+                    var testResult = await _apiClient.TestConnectionAsync();
+                    List<StaticGroupInfo>? groups = null;
+                    if (testResult.IsSuccess)
+                    {
+                        var groupsResult = await _apiClient.GetStaticGroupsAsync();
+                        groups = groupsResult.IsSuccess ? groupsResult.Value : null;
+                    }
                     Plugin.Framework.RunOnFrameworkThread(() =>
                     {
-                        if (result != null)
+                        if (testResult.IsSuccess)
                         {
-                            _connectionStatus = $"Connected (API v{result.Version})";
+                            _connectionStatus = $"Connected (API v{testResult.Value!.Version})";
                             _connectionStatusColor = Theme.Success;
                             _staticGroups = groups;
                         }
                         else
                         {
-                            _connectionStatus = _config.UseCustomUrls
-                                ? "Connection failed. Check API key and custom URLs."
-                                : "Connection failed. Check API key.";
+                            _connectionStatus = testResult.Error == ApiError.Unauthorized
+                                ? "API key rejected — re-authorize via /xrp config"
+                                : _config.UseCustomUrls
+                                    ? "Connection failed. Check API key and custom URLs."
+                                    : "Connection failed. Check API key.";
                             _connectionStatusColor = Theme.Error;
                         }
                         _isTesting = false;
@@ -310,10 +322,10 @@ public class ConfigWindow : Window, IDisposable
             var groupId = _config.DefaultGroupId;
             Task.Run(async () =>
             {
-                var tiers = await _apiClient.GetTiersAsync(groupId);
+                var tiersResult = await _apiClient.GetTiersAsync(groupId);
                 Plugin.Framework.RunOnFrameworkThread(() =>
                 {
-                    _tiers = tiers;
+                    _tiers = tiersResult.IsSuccess ? tiersResult.Value : new List<TierInfo>();
                     _isFetchingTiers = false;
                 });
             });
@@ -406,11 +418,11 @@ public class ConfigWindow : Window, IDisposable
                     _isFetchingRoster = true;
                     Task.Run(async () =>
                     {
-                        var priority = await _apiClient.GetPriorityAsync();
+                        var priorityResult = await _apiClient.GetPriorityAsync();
                         Plugin.Framework.RunOnFrameworkThread(() =>
                         {
-                            if (priority != null)
-                                _staticPlayers = priority.Players;
+                            if (priorityResult.IsSuccess)
+                                _staticPlayers = priorityResult.Value!.Players;
                             _isFetchingRoster = false;
                         });
                     });
@@ -533,11 +545,11 @@ public class ConfigWindow : Window, IDisposable
             _isFetchingRoster = true;
             Task.Run(async () =>
             {
-                var priority = await _apiClient.GetPriorityAsync();
+                var priorityResult = await _apiClient.GetPriorityAsync();
                 Plugin.Framework.RunOnFrameworkThread(() =>
                 {
-                    if (priority != null)
-                        _staticPlayers = priority.Players;
+                    if (priorityResult.IsSuccess)
+                        _staticPlayers = priorityResult.Value!.Players;
                     _isFetchingRoster = false;
                 });
             });

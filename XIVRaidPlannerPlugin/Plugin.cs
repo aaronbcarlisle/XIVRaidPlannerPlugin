@@ -295,11 +295,11 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             // Send update to API
-            var success = await _apiClient.SyncPlayerGearAsync(
+            var syncResult = await _apiClient.SyncPlayerGearAsync(
                 freshGear.PlayerId,
                 new SnapshotPlayerUpdateRequest { Gear = updatedGear, TomeWeapon = tomeWeaponUpdate });
 
-            if (success)
+            if (syncResult.IsSuccess)
             {
                 // Invalidate cache before re-fetch (safe from background thread — ConcurrentDictionary)
                 _bisData.InvalidatePlayer(freshGear.PlayerId);
@@ -330,7 +330,10 @@ public sealed class Plugin : IDalamudPlugin
             }
             else
             {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError("[XRP] Failed to sync gear. Check connection."));
+                var errMsg = syncResult.Error == ApiError.Unauthorized
+                    ? "[XRP] API key rejected — re-authorize via /xrp config"
+                    : "[XRP] Failed to sync gear. Check connection.";
+                Framework.RunOnFrameworkThread(() => ChatGui.PrintError(errMsg));
             }
         });
     }
@@ -351,9 +354,10 @@ public sealed class Plugin : IDalamudPlugin
             // Set transiently on config (no Save) so display shows tier name; cleared on instance exit
             if (!string.IsNullOrEmpty(Configuration.DefaultGroupId) && string.IsNullOrEmpty(Configuration.DefaultTierId))
             {
-                var activeTier = await _apiClient.ResolveActiveTierAsync(Configuration.DefaultGroupId);
-                if (activeTier != null)
+                var tierResult = await _apiClient.ResolveActiveTierAsync(Configuration.DefaultGroupId);
+                if (tierResult.IsSuccess)
                 {
+                    var activeTier = tierResult.Value!;
                     Log.Information($"Auto-detected active tier: {activeTier.TierId} ({activeTier.Id})");
                     Configuration.DefaultTierId = activeTier.Id;
                     Configuration.DefaultTierName = activeTier.TierId;
@@ -371,7 +375,8 @@ public sealed class Plugin : IDalamudPlugin
             if (string.IsNullOrEmpty(Configuration.DefaultTierId))
                 return;
 
-            _cachedPriority = await _apiClient.GetPriorityAsync(floor);
+            var priorityResult = await _apiClient.GetPriorityAsync(floor);
+            _cachedPriority = priorityResult.IsSuccess ? priorityResult.Value : null;
             if (_cachedPriority != null)
             {
                 var floorName = floor <= _cachedPriority.TierFloors.Count
@@ -392,16 +397,12 @@ public sealed class Plugin : IDalamudPlugin
                 _bisData.AvailablePlayers = _cachedPriority.Players;
 
                 // Set user role from the static group info
-                try
+                var groupsResult = await _apiClient.GetStaticGroupsAsync();
+                if (groupsResult.IsSuccess)
                 {
-                    var groups = await _apiClient.GetStaticGroupsAsync();
-                    var group = groups.Find(g => g.Id == Configuration.DefaultGroupId);
+                    var group = groupsResult.Value!.Find(g => g.Id == Configuration.DefaultGroupId);
                     if (group?.UserRole != null)
                         _bisData.UserRole = group.UserRole;
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning($"Failed to fetch user role: {ex.Message}");
                 }
 
                 var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
@@ -545,8 +546,8 @@ public sealed class Plugin : IDalamudPlugin
             case AutoLogMode.Confirm:
                 Task.Run(async () =>
                 {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
+                    var weekResult = await _apiClient.GetCurrentWeekAsync();
+                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
                     Framework.RunOnFrameworkThread(() =>
                         _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week, eligibleSlots));
                 });
@@ -555,8 +556,8 @@ public sealed class Plugin : IDalamudPlugin
             case AutoLogMode.Auto:
                 Task.Run(async () =>
                 {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
+                    var weekResult = await _apiClient.GetCurrentWeekAsync();
+                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
                     // Auto-select slot if only one option; otherwise log without augmentation
                     var autoSlot = eligibleSlots is { Length: 1 } ? eligibleSlots[0] : null;
                     await LogLootAsync(playerId, loot.GearSlot, loot.MaterialType, floorName, week, autoSlot);
@@ -610,8 +611,8 @@ public sealed class Plugin : IDalamudPlugin
             case AutoLogMode.Confirm:
                 Task.Run(async () =>
                 {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
+                    var weekResult = await _apiClient.GetCurrentWeekAsync();
+                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
 
                     // Show confirmation for the purchase
                     var lootEvent = new LootEvent
@@ -631,8 +632,8 @@ public sealed class Plugin : IDalamudPlugin
             case AutoLogMode.Auto:
                 Task.Run(async () =>
                 {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
+                    var weekResult = await _apiClient.GetCurrentWeekAsync();
+                    var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
                     await LogPurchaseAsync(capturedPlayerId, purchase, floorName, week);
                 });
                 break;
@@ -648,7 +649,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (purchase.IsGear && purchase.GearSlot != null)
         {
-            var success = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
+            var result = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
             {
                 WeekNumber = weekNumber,
                 Floor = floorName,
@@ -659,7 +660,7 @@ public sealed class Plugin : IDalamudPlugin
                 MarkAcquired = true,
             });
 
-            if (success)
+            if (result.IsSuccess)
             {
                 Framework.RunOnFrameworkThread(() =>
                 {
@@ -671,12 +672,12 @@ public sealed class Plugin : IDalamudPlugin
             {
                 Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log purchase: {purchase.ItemName}"));
             }
-            return success;
+            return result.IsSuccess;
         }
 
         if (purchase.IsMaterial && purchase.MaterialType != null)
         {
-            var success = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
+            var result = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
             {
                 WeekNumber = weekNumber,
                 Floor = floorName,
@@ -686,7 +687,7 @@ public sealed class Plugin : IDalamudPlugin
                 Notes = "Auto-logged via Dalamud plugin",
             });
 
-            if (success)
+            if (result.IsSuccess)
             {
                 Framework.RunOnFrameworkThread(() => ChatGui.Print($"[XRP] Material purchase logged: {purchase.ItemName}"));
             }
@@ -694,7 +695,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log material purchase: {purchase.ItemName}"));
             }
-            return success;
+            return result.IsSuccess;
         }
 
         return false;
@@ -712,8 +713,8 @@ public sealed class Plugin : IDalamudPlugin
         {
             try
             {
-                var weekData = await _apiClient.GetCurrentWeekAsync();
-                var week = weekData?.CurrentWeek ?? 1;
+                var weekResult = await _apiClient.GetCurrentWeekAsync();
+                var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
 
                 // Determine if this is a gear slot or material
                 string? gearSlot = null;
@@ -768,7 +769,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (materialType != null)
         {
-            return await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
+            var result = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
             {
                 WeekNumber = weekNumber,
                 Floor = floorName,
@@ -779,11 +780,12 @@ public sealed class Plugin : IDalamudPlugin
                 MarkAugmented = slotAugmented != null,
                 SlotAugmented = slotAugmented,
             });
+            return result.IsSuccess;
         }
 
         if (gearSlot != null)
         {
-            return await _apiClient.CreateLootLogEntryAsync(new LootLogCreateRequest
+            var result = await _apiClient.CreateLootLogEntryAsync(new LootLogCreateRequest
             {
                 WeekNumber = weekNumber,
                 Floor = floorName,
@@ -793,6 +795,7 @@ public sealed class Plugin : IDalamudPlugin
                 Notes = "Logged via Dalamud plugin",
                 MarkAcquired = true,
             });
+            return result.IsSuccess;
         }
 
         return false;
@@ -807,10 +810,10 @@ public sealed class Plugin : IDalamudPlugin
 
         Task.Run(async () =>
         {
-            var weekData = await _apiClient.GetCurrentWeekAsync();
-            var week = weekData?.CurrentWeek ?? 1;
+            var weekResult = await _apiClient.GetCurrentWeekAsync();
+            var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
 
-            var success = await _apiClient.MarkFloorClearedAsync(new MarkFloorClearedRequest
+            var result = await _apiClient.MarkFloorClearedAsync(new MarkFloorClearedRequest
             {
                 WeekNumber = week,
                 Floor = floorName,
@@ -818,7 +821,7 @@ public sealed class Plugin : IDalamudPlugin
                 Notes = "Logged via Dalamud plugin",
             });
 
-            if (success)
+            if (result.IsSuccess)
             {
                 Framework.RunOnFrameworkThread(() => _overlayWindow.MarkFloorCleared());
                 Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
@@ -847,8 +850,8 @@ public sealed class Plugin : IDalamudPlugin
     {
         try
         {
-            var weekData = await _apiClient.GetCurrentWeekAsync();
-            var week = weekData?.CurrentWeek ?? 1;
+            var weekResult = await _apiClient.GetCurrentWeekAsync();
+            var week = weekResult.IsSuccess ? weekResult.Value!.CurrentWeek : 1;
             var slotToFloor = BuildSlotToFloorMapping();
             var logged = 0;
 
@@ -856,7 +859,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 var floor = slotToFloor.GetValueOrDefault(slot,
                     _territoryService.CurrentFloorName ?? "M9S");
-                var logSuccess = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
+                var logResult = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
                 {
                     WeekNumber = week,
                     Floor = floor,
@@ -866,7 +869,7 @@ public sealed class Plugin : IDalamudPlugin
                     Notes = "Synced via Dalamud plugin",
                     MarkAcquired = true,
                 });
-                if (logSuccess) logged++;
+                if (logResult.IsSuccess) logged++;
             }
 
             if (logged > 0)
@@ -904,7 +907,8 @@ public sealed class Plugin : IDalamudPlugin
         if (_territoryService.CurrentFloor == null) return;
 
         var floor = _territoryService.CurrentFloor.Value;
-        _cachedPriority = await _apiClient.GetPriorityAsync(floor);
+        var priorityResult = await _apiClient.GetPriorityAsync(floor);
+        _cachedPriority = priorityResult.IsSuccess ? priorityResult.Value : null;
 
         if (_cachedPriority != null)
         {
