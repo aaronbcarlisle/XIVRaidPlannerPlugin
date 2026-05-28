@@ -1,0 +1,205 @@
+using System;
+using System.Collections.Generic;
+using Dalamud.Plugin.Services;
+using XIVRaidPlannerPlugin.Api;
+using XIVRaidPlannerPlugin.Windows;
+
+namespace XIVRaidPlannerPlugin.Services;
+
+/// <summary>
+/// Owns the equipped-gear → fresh-API-gear diff and the resulting sync POST.
+/// Extracted from Plugin.cs.
+/// </summary>
+public sealed class GearSyncService
+{
+    private readonly RaidPlannerClient _api;
+    private readonly InventoryService _inventory;
+    private readonly BiSDataService _bisData;
+    private readonly PluginThread _thread;
+    private readonly IChatGui _chat;
+    private readonly IPlayerState _playerState;
+    private readonly Configuration _config;
+    private readonly BiSViewerWindow _bisViewerWindow;
+    private readonly LootLogCoordinator _lootLog;
+    private readonly Func<RaidSessionState> _sessionState;
+    private readonly IPluginLog _log;
+
+    public GearSyncService(
+        RaidPlannerClient api,
+        InventoryService inventory,
+        BiSDataService bisData,
+        PluginThread thread,
+        IChatGui chat,
+        IPlayerState playerState,
+        Configuration config,
+        BiSViewerWindow bisViewerWindow,
+        LootLogCoordinator lootLog,
+        Func<RaidSessionState> sessionState,
+        IPluginLog log)
+    {
+        _api = api;
+        _inventory = inventory;
+        _bisData = bisData;
+        _thread = thread;
+        _chat = chat;
+        _playerState = playerState;
+        _config = config;
+        _bisViewerWindow = bisViewerWindow;
+        _lootLog = lootLog;
+        _sessionState = sessionState;
+        _log = log;
+    }
+
+    // ==================== Pure diff (TDD) ====================
+
+    /// <summary>
+    /// Diff updated equipped gear against fresh API gear, counting changes
+    /// and detecting newly-acquired slots (now-has-item, previously-didn't).
+    /// </summary>
+    public static GearDiff Diff(List<GearSlotStatusDto> updated, List<GearSlotStatusDto> fresh)
+    {
+        var changes = 0;
+        var acquired = new List<string>();
+        for (var i = 0; i < updated.Count && i < fresh.Count; i++)
+        {
+            if (updated[i].CurrentSource != fresh[i].CurrentSource ||
+                updated[i].HasItem != fresh[i].HasItem ||
+                updated[i].IsAugmented != fresh[i].IsAugmented)
+                changes++;
+            if (updated[i].HasItem && !fresh[i].HasItem)
+                acquired.Add(updated[i].Slot);
+        }
+        return new GearDiff { ChangeCount = changes, NewlyAcquired = acquired };
+    }
+
+    // ==================== Sync entry point ====================
+
+    /// <summary>Sync equipped gear with the web app (called from `/xrp sync` and BiS viewer button).</summary>
+    public void Sync()
+    {
+        if (string.IsNullOrEmpty(_config.ApiKey))
+        {
+            _chat.PrintError("[XRP] No API key configured. Use /xrp config.");
+            return;
+        }
+
+        var currentGear = _bisData.CurrentPlayerGear;
+        if (currentGear == null)
+        {
+            _chat.PrintError("[XRP] No BiS data loaded. Enter a savage instance or use /xrp bis first.");
+            return;
+        }
+
+        _chat.Print("[XRP] Syncing equipped gear...");
+
+        // Read equipped items — safe: called from command handler or Draw() button, both on framework thread
+        var equipped = _inventory.ReadEquippedGear();
+        if (equipped.Count == 0)
+        {
+            _chat.PrintError("[XRP] Could not read equipped gear.");
+            return;
+        }
+
+        // Re-fetch fresh gear data from API before comparing (web app might have changed)
+        var playerId = currentGear.PlayerId;
+        _bisData.InvalidatePlayer(playerId);
+        _thread.RunBackground(async () =>
+        {
+            // Fetch latest gear state from API (in case user reset progress on web app)
+            await _bisData.FetchPlayerGearAsync(playerId, isCurrentPlayer: true);
+            var freshGear = _bisData.CurrentPlayerGear;
+            if (freshGear == null)
+            {
+                _thread.RunOnUi(() => _chat.PrintError("[XRP] Failed to fetch current gear state from API."));
+                return;
+            }
+
+            // Build the gear update comparing equipped items against FRESH API data
+            var updatedGear = _inventory.BuildGearUpdate(equipped, freshGear.Gear);
+
+            // Check tome weapon status
+            TomeWeaponInfo? tomeWeaponUpdate = null;
+            if (freshGear.TomeWeapon.Pursuing && equipped.TryGetValue("weapon", out var equippedWeapon))
+            {
+                var weaponSource = _inventory.ClassifySource(equippedWeapon.ItemId);
+                if (weaponSource is "tome" or "tome_up")
+                {
+                    tomeWeaponUpdate = new TomeWeaponInfo
+                    {
+                        Pursuing = true,
+                        HasItem = true,
+                        IsAugmented = weaponSource == "tome_up",
+                    };
+                    _log.Info($"[Sync] Detected tome weapon: source={weaponSource}, augmented={tomeWeaponUpdate.IsAugmented}");
+                }
+            }
+
+            // Diff updated vs. fresh
+            var diff = Diff(updatedGear, freshGear.Gear);
+            var changes = diff.ChangeCount;
+            var newlyAcquired = diff.NewlyAcquired;
+
+            // Also count tome weapon as a change
+            if (tomeWeaponUpdate != null && !freshGear.TomeWeapon.HasItem)
+                changes++;
+
+            _log.Info($"[Sync] Comparison: {changes} gear changes, {newlyAcquired.Count} newly acquired, tomeWeapon={tomeWeaponUpdate != null}");
+
+            if (changes == 0)
+            {
+                _thread.RunOnUi(() => _chat.Print("[XRP] Gear already up to date."));
+                return;
+            }
+
+            // Send update to API
+            var syncResult = await _api.SyncPlayerGearAsync(
+                freshGear.PlayerId,
+                new SnapshotPlayerUpdateRequest { Gear = updatedGear, TomeWeapon = tomeWeaponUpdate });
+
+            if (syncResult.IsSuccess)
+            {
+                // Invalidate cache before re-fetch (safe from background thread — ConcurrentDictionary)
+                _bisData.InvalidatePlayer(freshGear.PlayerId);
+
+                // Marshal UI updates to framework thread
+                _thread.RunOnUi(() =>
+                {
+                    _chat.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
+                    _bisViewerWindow.InvalidateEquippedGear();
+                });
+
+                // Auto-log loot entries only when in a savage instance with reliable floor data
+                var state = _sessionState();
+                if (newlyAcquired.Count > 0 && state.CachedPriority != null && state.CurrentFloor != null)
+                {
+                    try { await _lootLog.LogNewAcquisitionsAsync(freshGear.PlayerId, newlyAcquired); }
+                    catch (Exception ex) { _log.Warning($"Loot logging failed (non-critical): {ex.Message}"); }
+                }
+                else if (newlyAcquired.Count > 0)
+                {
+                    _thread.RunOnUi(() =>
+                        _chat.Print($"[XRP] {newlyAcquired.Count} new BiS item(s) detected. Enter a savage instance to auto-log."));
+                }
+
+                // Re-fetch to update the BiS viewer (cache was invalidated above)
+                var charName = _playerState.IsLoaded ? _playerState.CharacterName?.ToString() : null;
+                if (!string.IsNullOrEmpty(charName))
+                    await _bisData.FetchCurrentPlayerGearAsync(charName);
+            }
+            else
+            {
+                var errMsg = syncResult.Error == ApiError.Unauthorized
+                    ? "[XRP] API key rejected — re-authorize via /xrp config"
+                    : "[XRP] Failed to sync gear. Check connection.";
+                _thread.RunOnUi(() => _chat.PrintError(errMsg));
+            }
+        });
+    }
+}
+
+/// <summary>Result of diffing equipped gear against fresh API gear.</summary>
+public sealed class GearDiff
+{
+    public int ChangeCount { get; init; }
+    public List<string> NewlyAcquired { get; init; } = new();
+}

@@ -22,10 +22,9 @@ public sealed class LootLogCoordinator
     private readonly PartyMatchingService _partyMatching;
     private readonly IPluginLog _log;
     private readonly Configuration _config;
-    private readonly Func<int?> _currentFloor;
     private readonly Func<string?> _currentFloorName;
     private readonly Func<PriorityResponse?> _cachedPriority;
-    private readonly Func<Task> _refreshPriority; // TODO Task 12: replace with direct RaidSessionService dep when extracted
+    private readonly Func<Task> _refreshPriority;
 
     // Kept as internal references so handlers can call MarkAsLogged / MarkLogFailed / MarkFloorCleared / ShowForLoot
     private readonly PriorityOverlayWindow _overlayWindow;
@@ -41,7 +40,6 @@ public sealed class LootLogCoordinator
         PartyMatchingService partyMatching,
         IPluginLog log,
         Configuration config,
-        Func<int?> currentFloor,
         Func<string?> currentFloorName,
         Func<PriorityResponse?> cachedPriority,
         Func<Task> refreshPriority,
@@ -57,7 +55,6 @@ public sealed class LootLogCoordinator
         _partyMatching = partyMatching;
         _log = log;
         _config = config;
-        _currentFloor = currentFloor;
         _currentFloorName = currentFloorName;
         _cachedPriority = cachedPriority;
         _refreshPriority = refreshPriority;
