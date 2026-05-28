@@ -84,7 +84,7 @@ public sealed class BrowserAuthService
             return ApiResult<string>.Fail(ApiError.Unauthorized);
         }
 
-        var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, ct);
+        var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, timeout.Token);
         if (result.IsSuccess)
         {
             _config.ApiKey = result.Value!;

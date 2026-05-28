@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
@@ -39,6 +40,7 @@ public sealed class RaidSessionService : IDisposable
 
     private PriorityResponse? _cachedPriority;
     private bool _autoDetectedTier;
+    private CancellationTokenSource? _sessionCts;
 
     public PriorityResponse? CachedPriority => _cachedPriority;
 
@@ -90,6 +92,9 @@ public sealed class RaidSessionService : IDisposable
         _territory.OnSavageExited -= OnSavageExited;
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "DutyComplete", OnDutyCompleteSetup);
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, "NeedGreed", OnNeedGreedSetup);
+        _sessionCts?.Cancel();
+        _sessionCts?.Dispose();
+        _sessionCts = null;
     }
 
     // ==================== Territory Events ====================
@@ -101,6 +106,12 @@ public sealed class RaidSessionService : IDisposable
 
         _lootDetection.Reset();
 
+        // Cancel any in-flight work from a previous session and start a fresh token
+        _sessionCts?.Cancel();
+        _sessionCts?.Dispose();
+        _sessionCts = new CancellationTokenSource();
+        var ct = _sessionCts.Token;
+
         // Fetch priority data (always fetch, even if overlay is hidden, so data is ready)
         _thread.RunBackground(async () =>
         {
@@ -108,7 +119,8 @@ public sealed class RaidSessionService : IDisposable
             // Set transiently on config (no Save) so display shows tier name; cleared on instance exit
             if (!string.IsNullOrEmpty(_config.DefaultGroupId) && string.IsNullOrEmpty(_config.DefaultTierId))
             {
-                var tierResult = await _api.ResolveActiveTierAsync(_config.DefaultGroupId);
+                var tierResult = await _api.ResolveActiveTierAsync(_config.DefaultGroupId, ct);
+                if (ct.IsCancellationRequested) return;
                 if (tierResult.IsSuccess)
                 {
                     var activeTier = tierResult.Value!;
@@ -129,7 +141,8 @@ public sealed class RaidSessionService : IDisposable
             if (string.IsNullOrEmpty(_config.DefaultTierId))
                 return;
 
-            var priorityResult = await _api.GetPriorityAsync(floor);
+            var priorityResult = await _api.GetPriorityAsync(floor, ct: ct);
+            if (ct.IsCancellationRequested) return;
             if (!priorityResult.IsSuccess)
             {
                 var msg = priorityResult.Error == ApiError.Unauthorized
@@ -160,7 +173,8 @@ public sealed class RaidSessionService : IDisposable
                 _bisData.AvailablePlayers = _cachedPriority.Players;
 
                 // Set user role from the static group info
-                var groupsResult = await _api.GetStaticGroupsAsync();
+                var groupsResult = await _api.GetStaticGroupsAsync(ct);
+                if (ct.IsCancellationRequested) return;
                 if (groupsResult.IsSuccess)
                 {
                     var group = groupsResult.Value!.Find(g => g.Id == _config.DefaultGroupId);
@@ -172,6 +186,7 @@ public sealed class RaidSessionService : IDisposable
                 if (!string.IsNullOrEmpty(charName))
                 {
                     await _bisData.FetchCurrentPlayerGearAsync(charName);
+                    if (ct.IsCancellationRequested) return;
 
                     // Show BiS viewer if configured
                     if (_config.ShowBisViewer)
@@ -183,12 +198,18 @@ public sealed class RaidSessionService : IDisposable
 
     private void OnSavageExited()
     {
+        // Cancel any in-flight background work from the session that just ended
+        _sessionCts?.Cancel();
+
         _overlayWindow.ClearData();
         _overlayWindow.IsOpen = false;
         _leaveWarningWindow.IsOpen = false;
         _bisViewerWindow.IsOpen = false;
         _bisData.ClearCache();
         _api.InvalidateResolvedTier();
+
+        // Clear cached priority so consumers don't read stale data after exiting
+        _cachedPriority = null;
 
         // Clear auto-detected tier so it re-detects on next entry
         if (_autoDetectedTier)
