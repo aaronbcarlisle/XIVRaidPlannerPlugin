@@ -41,7 +41,7 @@ jobs:
         run: dotnet test --configuration Release --no-build
 
       - name: Format check
-        run: dotnet format whitespace --verify-no-changes
+        run: dotnet format --verify-no-changes
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
