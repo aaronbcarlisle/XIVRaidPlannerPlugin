@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
 
@@ -38,11 +36,6 @@ public class PartyMatchingService
     /// </summary>
     public void MatchParty(List<PlayerInfo> plannerPlayers)
     {
-        CurrentMatches.Clear();
-        UnmatchedPlayers = new List<PlayerInfo>(plannerPlayers);
-        UnmatchedPartyMembers = new List<string>();
-
-        // Get party member names
         var partyNames = new List<string>();
         foreach (var member in _partyList)
         {
@@ -51,34 +44,10 @@ public class PartyMatchingService
                 partyNames.Add(name);
         }
 
-        foreach (var partyName in partyNames)
-        {
-            // 1. Check manual overrides first
-            if (_config.PlayerNameOverrides.TryGetValue(partyName, out var overrideId))
-            {
-                var overridePlayer = UnmatchedPlayers.FirstOrDefault(p => p.Id == overrideId);
-                if (overridePlayer != null)
-                {
-                    CurrentMatches[partyName] = overrideId;
-                    UnmatchedPlayers.Remove(overridePlayer);
-                    continue;
-                }
-            }
-
-            // 2. Exact name match (case-insensitive)
-            var exactMatch = UnmatchedPlayers.FirstOrDefault(
-                p => string.Equals(p.Name.Trim(), partyName, StringComparison.OrdinalIgnoreCase));
-
-            if (exactMatch != null)
-            {
-                CurrentMatches[partyName] = exactMatch.Id;
-                UnmatchedPlayers.Remove(exactMatch);
-                continue;
-            }
-
-            // 3. No match found
-            UnmatchedPartyMembers.Add(partyName);
-        }
+        var matchResult = PartyMatcher.Match(partyNames, plannerPlayers, _config.PlayerNameOverrides);
+        CurrentMatches = matchResult.Matches;
+        UnmatchedPlayers = matchResult.UnmatchedPlayers;
+        UnmatchedPartyMembers = matchResult.UnmatchedPartyMembers;
 
         _log.Information(
             $"Party matching: {CurrentMatches.Count} matched, " +
