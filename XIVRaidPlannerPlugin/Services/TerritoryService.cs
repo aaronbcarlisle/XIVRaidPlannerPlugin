@@ -160,7 +160,7 @@ public class TerritoryService : IDisposable
         return null;
     }
 
-    private void OnTerritoryChanged(ushort territoryId)
+    private void OnTerritoryChanged(uint territoryId)
     {
         if (_savageTerritories.TryGetValue(territoryId, out var info))
         {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using Dalamud.Game.Chat;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
@@ -35,7 +36,7 @@ public class LootDetectionService : IDisposable
         _dataManager = dataManager;
         _log = log;
 
-        _chatGui.ChatMessage += OnChatMessage;
+        _chatGui.ChatMessage += OnChatMessageNew;
     }
 
     /// <summary>Clear state when entering a new instance.</summary>
@@ -45,8 +46,11 @@ public class LootDetectionService : IDisposable
         PendingDrops.Clear();
     }
 
-    private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
+    private void OnChatMessageNew(IHandleableChatMessage msg)
     {
+        var type = msg.LogKind;
+        var message = msg.Message;
+
         // Chat types for loot/purchase detection:
         //   2105 = LootNotice ("X obtains Y")
         //   SystemMessage (enum) = general system messages
@@ -211,7 +215,7 @@ public class LootDetectionService : IDisposable
 
     public void Dispose()
     {
-        _chatGui.ChatMessage -= OnChatMessage;
+        _chatGui.ChatMessage -= OnChatMessageNew;
     }
 }
 
