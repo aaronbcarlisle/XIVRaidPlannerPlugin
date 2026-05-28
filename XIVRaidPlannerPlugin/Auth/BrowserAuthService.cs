@@ -26,11 +26,33 @@ public sealed class BrowserAuthService
     public async Task<ApiResult<string>> SignInAsync(CancellationToken ct = default)
     {
         var pkce = PkceCodes.Generate();
-        using var listener = new HttpListener();
-        var port = GetFreeLoopbackPort();
-        var redirect = $"http://127.0.0.1:{port}/callback/";
-        listener.Prefixes.Add(redirect);
-        listener.Start();
+        HttpListener? listener = null;
+        string redirect = string.Empty;
+        const int maxAttempts = 3;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            var port = GetFreeLoopbackPort();
+            var candidate = new HttpListener();
+            candidate.Prefixes.Add($"http://127.0.0.1:{port}/callback/");
+            try
+            {
+                candidate.Start();
+                listener = candidate;
+                redirect = $"http://127.0.0.1:{port}/callback/";
+                break;
+            }
+            catch (HttpListenerException ex)
+            {
+                candidate.Close();
+                _log.Warning($"[BrowserAuth] Loopback bind on port {port} failed (attempt {attempt + 1}/{maxAttempts}): {ex.Message}");
+            }
+        }
+        if (listener == null)
+        {
+            _log.Error("[BrowserAuth] Could not bind a loopback port after retries");
+            return ApiResult<string>.Fail(ApiError.Network);
+        }
+        using var _disposeListener = listener;
 
         var url = $"{_config.EffectiveFrontendBaseUrl.TrimEnd('/')}/plugin-auth" +
                   $"?redirect_uri={Uri.EscapeDataString(redirect)}" +

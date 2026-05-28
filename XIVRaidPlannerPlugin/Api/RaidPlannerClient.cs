@@ -48,8 +48,11 @@ public class RaidPlannerClient : IDisposable
     {
         var baseUrl = _config.EffectiveApiBaseUrl.TrimEnd('/');
         var client = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        if (!string.IsNullOrEmpty(_config.ApiKey))
+        {
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        }
         return client;
     }
 
