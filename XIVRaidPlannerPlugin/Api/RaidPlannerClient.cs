@@ -69,6 +69,15 @@ public class RaidPlannerClient : IDisposable
     // ==================== Tier Resolution ====================
 
     /// <summary>
+    /// User-visible warning from the last tier-resolution attempt. Set when the
+    /// resolver had to fall back to the most-recent tier because no tier in the
+    /// static is flagged active — the UI surfaces this so the user isn't silently
+    /// pointed at an arbitrary tier when the static owner forgot to mark one active.
+    /// Cleared whenever a real active tier is resolved successfully.
+    /// </summary>
+    public string? LastTierResolutionWarning { get; private set; }
+
+    /// <summary>
     /// Resolve the active tier ID for a group when no tier is explicitly configured.
     /// Caches the result per group to avoid repeated /tiers network calls in Auto mode.
     /// </summary>
@@ -88,6 +97,7 @@ public class RaidPlannerClient : IDisposable
             _log.Information($"Resolved active tier: {active.TierId} ({active.Id})");
             _cachedResolvedTierId = active.Id;
             _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = null;
             return ApiResult<string>.Ok(active.Id);
         }
 
@@ -99,10 +109,12 @@ public class RaidPlannerClient : IDisposable
             _log.Warning($"No active tier flagged for group; falling back to most recent: {fallback.TierId} ({fallback.Id})");
             _cachedResolvedTierId = fallback.Id;
             _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = $"No tier is marked active for this static. Using \"{fallback.TierId}\" (most recent) — ask the owner to mark a tier active in the web app, or pick one in the Static tab.";
             return ApiResult<string>.Ok(fallback.Id);
         }
 
         _log.Warning("No tiers exist for group");
+        LastTierResolutionWarning = null;
         return ApiResult<string>.Fail(ApiError.NotFound);
     }
 
@@ -111,6 +123,7 @@ public class RaidPlannerClient : IDisposable
     {
         _cachedResolvedTierId = null;
         _cachedResolvedGroupId = null;
+        LastTierResolutionWarning = null;
     }
 
     /// <summary>Resolve the active tier for a group, returning the full TierInfo for display purposes.</summary>
@@ -125,6 +138,7 @@ public class RaidPlannerClient : IDisposable
         {
             _cachedResolvedTierId = active.Id;
             _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = null;
             return ApiResult<TierInfo>.Ok(active);
         }
 
@@ -134,6 +148,7 @@ public class RaidPlannerClient : IDisposable
             var fallback = tiers[0];
             _cachedResolvedTierId = fallback.Id;
             _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = $"No tier is marked active for this static. Using \"{fallback.TierId}\" (most recent) — ask the owner to mark a tier active in the web app, or pick one in the Static tab.";
             return ApiResult<TierInfo>.Ok(fallback);
         }
 

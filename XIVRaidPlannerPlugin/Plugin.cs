@@ -248,7 +248,15 @@ public sealed class Plugin : IDalamudPlugin
         // If the override was cleared (None), don't auto-fetch — let the user open BiS to retry.
         if (newPlayerId == null) return;
 
-        _thread.RunBackground(async () => await _bisData.FetchCurrentPlayerGearAsync(localName));
+        _thread.RunBackground(async () =>
+        {
+            await _bisData.FetchCurrentPlayerGearAsync(localName);
+            // Surface fetch failures on the Players tab — without this, a 401/network
+            // error from a Players-tab dropdown change is only visible the next time
+            // the user opens the BiS window, with no connection back to what they did.
+            if (!string.IsNullOrEmpty(_bisData.LastError))
+                _configWindow.ShowPlayerLinkStatus($"Linked, but couldn't load BiS gear: {_bisData.LastError}", Theme.Warning);
+        });
     }
 
     private void OnRefreshRequested()

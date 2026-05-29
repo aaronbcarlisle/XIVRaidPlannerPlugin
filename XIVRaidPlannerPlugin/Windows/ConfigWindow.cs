@@ -734,6 +734,14 @@ public class ConfigWindow : Window, IDisposable
                 _staticPlayers = priorityResult.Value!.Players;
                 if (_staticPlayers.Count == 0)
                     _rosterFetchError = "Tier loaded but has no players. Add players in the web app, or pick a different tier in the Static tab.";
+                // Surface "no tier is marked active" when the resolver fell back to most-recent —
+                // otherwise the user is silently pointed at an arbitrary tier and the actionable
+                // error message ("pick a specific tier or mark one active") never fires.
+                else if (!string.IsNullOrEmpty(_apiClient.LastTierResolutionWarning))
+                {
+                    _autoDetectStatus = _apiClient.LastTierResolutionWarning;
+                    _autoDetectStatusColor = Theme.Warning;
+                }
             }
             else
             {
@@ -751,6 +759,21 @@ public class ConfigWindow : Window, IDisposable
 
         if (priorityResult.IsSuccess && priorityResult.Value!.Players.Count > 0)
             await TryAutoDetectPlayerAsync(priorityResult.Value!.Players, force: force);
+    }
+
+    /// <summary>
+    /// External hook used by Plugin.cs to surface BiS-fetch failures on the Players
+    /// tab when the local character's link changes outside of the auto-detect chain
+    /// (e.g., dropdown change). Without this, fetch errors only became visible when
+    /// the user next opened the BiS window — long after the action that triggered them.
+    /// </summary>
+    public void ShowPlayerLinkStatus(string message, Vector4 color)
+    {
+        _thread.RunOnUi(() =>
+        {
+            _autoDetectStatus = message;
+            _autoDetectStatusColor = color;
+        });
     }
 
     /// <summary>
@@ -787,7 +810,24 @@ public class ConfigWindow : Window, IDisposable
         }
 
         var playersResult = await _apiClient.GetSnapshotPlayersAsync();
-        if (!playersResult.IsSuccess) return; // Already surfaced upstream; stay quiet here.
+        if (!playersResult.IsSuccess)
+        {
+            // The manual "Auto-detect my player" button bypasses ReloadRosterAndAutoDetectAsync,
+            // so this is the only chance to tell the user why the click did nothing.
+            _thread.RunOnUi(() =>
+            {
+                _autoDetectStatus = playersResult.Error switch
+                {
+                    ApiError.NotFound => "Couldn't load the player list. Pick a specific tier in the Static tab and try again.",
+                    ApiError.Unauthorized => "Not signed in or API key was revoked. Re-authorize in the Connection tab.",
+                    ApiError.Network => "Network error while looking up players. Check your connection.",
+                    ApiError.Server => "Server error while looking up players. Try again in a moment.",
+                    _ => "Couldn't look up players. See plugin log for details.",
+                };
+                _autoDetectStatusColor = Theme.Warning;
+            });
+            return;
+        }
 
         var matches = playersResult.Value!.FindAll(p => p.UserId == meResult.Value!.Id);
         _thread.RunOnUi(() =>
