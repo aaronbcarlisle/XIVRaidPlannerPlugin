@@ -131,6 +131,7 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnRefresh += OnRefreshRequested;
         _lootConfirmWindow.OnConfirm += _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested += _gearSync.Sync;
+        _bisViewerWindow.OnRefreshRequested += OnBisRefreshRequested;
         // When the local character's player-link changes, drop the cached BiS gear and re-fetch
         // so the BiS window doesn't keep showing the previous player's data.
         _partyMatching.OnOverrideChanged += OnLocalPlayerLinkChanged;
@@ -144,7 +145,8 @@ public sealed class Plugin : IDalamudPlugin
         // Register UI drawing
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi += ToggleOverlay;
+        // Match the bare `/xrp` command — BiS viewer is the more useful default in town.
+        PluginInterface.UiBuilder.OpenMainUi += ToggleBisViewer;
 
         // Check if already in a savage instance (e.g., plugin loaded mid-instance)
         _territoryService.CheckCurrentTerritory();
@@ -157,7 +159,7 @@ public sealed class Plugin : IDalamudPlugin
         // Unsubscribe events
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
-        PluginInterface.UiBuilder.OpenMainUi -= ToggleOverlay;
+        PluginInterface.UiBuilder.OpenMainUi -= ToggleBisViewer;
 
         _lootDetection.OnLootObtained -= _lootLog.OnLootObtained;
         _lootDetection.OnItemPurchased -= _lootLog.OnItemPurchased;
@@ -166,6 +168,7 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnRefresh -= OnRefreshRequested;
         _lootConfirmWindow.OnConfirm -= _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested -= _gearSync.Sync;
+        _bisViewerWindow.OnRefreshRequested -= OnBisRefreshRequested;
         _partyMatching.OnOverrideChanged -= OnLocalPlayerLinkChanged;
 
         // Dispose services that own addon listeners FIRST
@@ -257,6 +260,29 @@ public sealed class Plugin : IDalamudPlugin
             // the user opens the BiS window, with no connection back to what they did.
             if (!string.IsNullOrEmpty(_bisData.LastError))
                 _configWindow.ShowPlayerLinkStatus($"Linked, but couldn't load BiS gear: {_bisData.LastError}", Theme.Warning);
+        });
+    }
+
+    /// <summary>
+    /// Refresh BiS gear data on viewer open and on the Refresh button. Fetches the
+    /// player ID we were last viewing (so dropdown selections persist across reopens),
+    /// or the current player if none was selected.
+    /// </summary>
+    private void OnBisRefreshRequested(string? playerId)
+    {
+        _thread.RunBackground(async () =>
+        {
+            if (!string.IsNullOrEmpty(playerId))
+            {
+                var isCurrent = _bisData.CurrentPlayerGear?.PlayerId == playerId;
+                await _bisData.FetchPlayerGearAsync(playerId, isCurrentPlayer: isCurrent);
+            }
+            else
+            {
+                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+                if (!string.IsNullOrEmpty(charName))
+                    await _bisData.FetchCurrentPlayerGearAsync(charName);
+            }
         });
     }
 

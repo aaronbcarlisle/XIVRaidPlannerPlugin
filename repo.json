@@ -8,7 +8,7 @@
     "Description": "Displays loot priority rankings during savage raids and auto-logs loot drops to your FFXIV Raid Planner static. Requires an API key from the web app.\n\nCommands:\n/xrp - Toggle BiS gear viewer\n/xrp priority - Toggle priority overlay\n/xrp sync - Sync equipped gear to web app\n/xrp config - Open configuration",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
-    "Changelog": "v0.3.1 \u2014 Plugin modernization\n\nNew\n- Sign in with browser: one-click PKCE loopback flow mints an API key without copy/paste. Open /xrp config \u2192 Connection \u2192 Sign in with browser.\n- Auto-detect your player: the plugin matches your character to a planner roster entry on sign-in and on static/tier changes.\n- BiS auto-loads on startup so vendor highlighting works without opening the BiS window first.\n- Bare /xrp now opens the BiS viewer; /xrp priority toggles the priority overlay.\n- Shop and Need/Greed highlighting fixed (correct ItemId offsets + filter list \u2014 no more wrong items).\n\nFixes & polish\n- SDK 15 / .NET 9 build, full service refactor, 28 unit tests, CI build/test/format gate.\n- Race-safe browser sign-in (atomic code exchange, per-user key limit, ASCII validation).\n- Stale priority cleared on savage exit; background sign-in chain cancellable on quick exit.\n- Plugin warns about unclaimed loot before you leave a savage instance.\n\nv0.3.1 republishes v0.3.0 with the in-game Changelog section and correct DalamudApiLevel metadata.",
+    "Changelog": "v0.3.2 — BiS viewer polish\n\nFixed\n- The Dalamud Open button now opens the BiS viewer to match /xrp.\n- Plugin icon now renders in the installer (was a broken case-sensitive path).\n- After sign-in, the Static and Tier dropdowns auto-populate instead of staying blank.\n- Switching players in the BiS viewer no longer leaks the previous player's equipped column for a frame.\n\nNew\n- BiS viewer auto-refreshes every time you open it.\n- New Refresh button in the BiS viewer header.\n- Party-member dropdown in the BiS viewer is now available to everyone (not just leads/owners), and works out-of-savage as soon as a roster is loaded.\n\nv0.3.0 highlights still apply: browser sign-in, auto-detect your player, bare /xrp opens BiS, fixed shop highlighting, SDK 15 / .NET 9 refactor.",
     "Tags": [
       "raid",
       "loot",
@@ -26,6 +26,6 @@
     "DownloadLinkInstall": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
     "DownloadLinkUpdate": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
     "DownloadLinkTesting": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
-    "IconUrl": "https://raw.githubusercontent.com/aaronbcarlisle/XIVRaidPlannerPlugin/main/XIVRaidPlannerPlugin/images/icon.png"
+    "IconUrl": "https://raw.githubusercontent.com/aaronbcarlisle/XIVRaidPlannerPlugin/main/XIVRaidPlannerPlugin/Images/icon.png"
   }
 ]

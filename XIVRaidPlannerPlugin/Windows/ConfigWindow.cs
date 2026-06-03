@@ -653,11 +653,13 @@ public class ConfigWindow : Window, IDisposable
         // Pick the static to use:
         //   1. If DefaultGroupId from previous session matches an accessible group, use it.
         //   2. Otherwise, if exactly one accessible group, auto-pick it.
-        //   3. Otherwise, let the user pick from the dropdown.
+        //   3. Otherwise, auto-pick the first one as a sensible default — leaving the
+        //      dropdowns visually empty after sign-in feels broken; the user can change
+        //      via the Static dropdown if they want a different one.
         StaticGroupInfo? selected = null;
         if (!string.IsNullOrEmpty(_config.DefaultGroupId))
             selected = groups.Find(g => g.Id == _config.DefaultGroupId);
-        if (selected == null && groups.Count == 1)
+        if (selected == null && groups.Count >= 1)
             selected = groups[0];
         if (selected == null) return;
 
@@ -700,6 +702,18 @@ public class ConfigWindow : Window, IDisposable
         {
             _tiers = tiersResult.IsSuccess ? tiersResult.Value : new List<TierInfo>();
             _isFetchingTiers = false;
+            // Bind the Tier dropdown to whatever the resolver actually picked. Without
+            // this, the dropdown shows blank even though DefaultTierId is set, and the
+            // user can't tell which tier is active.
+            if (_tiers is { Count: > 0 } && !string.IsNullOrEmpty(_config.DefaultTierId))
+            {
+                var idx = _tiers.FindIndex(t => t.Id == _config.DefaultTierId || t.TierId == _config.DefaultTierId);
+                _selectedTierIndex = idx;
+            }
+            else
+            {
+                _selectedTierIndex = -1; // Auto
+            }
         });
 
         // Ensure BiS data is loaded so vendor highlighting works without the user
@@ -758,7 +772,17 @@ public class ConfigWindow : Window, IDisposable
         });
 
         if (priorityResult.IsSuccess && priorityResult.Value!.Players.Count > 0)
+        {
+            // Populate BiSDataService so the in-window party dropdown works out-of-savage too.
+            // Previously this was only set when entering a savage instance (RaidSessionService).
+            _bisData.AvailablePlayers = priorityResult.Value!.Players;
+            var groupForRole = !string.IsNullOrEmpty(_config.DefaultGroupId)
+                ? _staticGroups?.Find(g => g.Id == _config.DefaultGroupId)
+                : null;
+            _bisData.UserRole = groupForRole?.UserRole;
+
             await TryAutoDetectPlayerAsync(priorityResult.Value!.Players, force: force);
+        }
     }
 
     /// <summary>

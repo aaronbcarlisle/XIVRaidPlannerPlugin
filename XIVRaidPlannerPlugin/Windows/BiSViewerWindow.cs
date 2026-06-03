@@ -108,6 +108,12 @@ public class BiSViewerWindow : Window, IDisposable
     private int _selectedPlayerIndex;
 
     public event System.Action? OnSyncRequested;
+    /// <summary>
+    /// Raised when the user opens the window or clicks Refresh. Wired in Plugin.cs to
+    /// re-fetch gear from the API (cache-busting). Subscribers receive the player ID
+    /// to refresh, or null to refresh the current player.
+    /// </summary>
+    public event System.Action<string?>? OnRefreshRequested;
 
     public BiSViewerWindow(BiSDataService bisData, InventoryService inventoryService, Configuration config, IDataManager dataManager, ITextureProvider textureProvider)
         : base("XIV Raid Planner \u2014 BiS###XRPBiSViewer", ImGuiWindowFlags.NoCollapse)
@@ -126,6 +132,19 @@ public class BiSViewerWindow : Window, IDisposable
 
     public void InvalidateEquippedGear() => _equippedGearStale = true;
 
+    /// <summary>
+    /// Refresh gear data every time the window opens. The cached BiS data can be stale
+    /// (player swapped a piece on the web app, sync ran, etc.) — and the old behavior
+    /// only fetched on first open, making /xrp toggle the only refresh path. Fires the
+    /// refresh request for whichever player is currently being viewed.
+    /// </summary>
+    public override void OnOpen()
+    {
+        _equippedGearStale = true;
+        var viewedId = _bisData.ViewedPlayerGear?.PlayerId;
+        OnRefreshRequested?.Invoke(viewedId);
+    }
+
     // ==================== Main Draw ====================
 
     public override void Draw()
@@ -133,7 +152,9 @@ public class BiSViewerWindow : Window, IDisposable
         var gear = _bisData.ViewedPlayerGear;
         if (gear == null) { DrawEmptyState(); return; }
 
-        if (_bisData.CanViewOtherPlayers && _bisData.AvailablePlayers is { Count: > 0 })
+        // Show the party dropdown whenever a roster is loaded — useful for everyone,
+        // not just leads/owners (members might want to check a teammate's progress).
+        if (_bisData.AvailablePlayers is { Count: > 0 })
         {
             // Sync dropdown index with currently viewed player
             var players = _bisData.AvailablePlayers;
@@ -185,7 +206,17 @@ public class BiSViewerWindow : Window, IDisposable
                 var rc = Theme.RoleColor(players[i].Role);
                 ImGui.PushStyleColor(ImGuiCol.Text, rc == Theme.White ? ColorTextMuted : rc);
                 if (ImGui.Selectable($"{players[i].Name} ({players[i].Job})##{players[i].Id}", i == idx))
-                { _selectedPlayerIndex = i; _ = _bisData.FetchPlayerGearAsync(players[i].Id); _equippedGearStale = true; }
+                {
+                    _selectedPlayerIndex = i;
+                    // Drop the cached equipped-from-inventory so a stale frame can't render
+                    // the previous self-view's items in the new player's right column.
+                    _equippedGear = null;
+                    _equippedGearStale = true;
+                    // Force a fresh fetch — the cached entry might be from when this player
+                    // hadn't yet synced their gear.
+                    _bisData.InvalidatePlayer(players[i].Id);
+                    _ = _bisData.FetchPlayerGearAsync(players[i].Id);
+                }
                 ImGui.PopStyleColor();
                 if (i == idx) ImGui.SetItemDefaultFocus();
             }
@@ -217,6 +248,17 @@ public class BiSViewerWindow : Window, IDisposable
             if (ImGui.SmallButton("Sync Gear")) { OnSyncRequested?.Invoke(); _equippedGearStale = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Sync equipped gear to web app");
         }
+
+        // Manual refresh — always available, regardless of who's being viewed.
+        ImGui.SameLine(); ImGui.TextColored(ColorTextMuted, " | "); ImGui.SameLine();
+        if (ImGui.SmallButton("Refresh"))
+        {
+            _bisData.InvalidatePlayer(gear.PlayerId);
+            _equippedGear = null;
+            _equippedGearStale = true;
+            OnRefreshRequested?.Invoke(gear.PlayerId);
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Re-fetch gear data from the web app");
 
         // Show static group / tier context
         if (!string.IsNullOrEmpty(_config.DefaultGroupName)
