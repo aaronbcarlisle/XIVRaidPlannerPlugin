@@ -47,16 +47,27 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           TIMESTAMP=$(date +%s)
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/latest.zip"
+          BUILT_MANIFEST="XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.json"
+          SOURCE_MANIFEST="XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.json"
 
           python3 -c "
-          import json, sys
+          import json
           with open('repo.json', 'r') as f:
               repo = json.load(f)
+          with open('${BUILT_MANIFEST}', 'r') as f:
+              built = json.load(f)
+          with open('${SOURCE_MANIFEST}', 'r') as f:
+              source = json.load(f)
           repo[0]['AssemblyVersion'] = '${VERSION}.0'
           repo[0]['LastUpdate'] = int(${TIMESTAMP})
           repo[0]['DownloadLinkInstall'] = '${DOWNLOAD_URL}'
           repo[0]['DownloadLinkUpdate'] = '${DOWNLOAD_URL}'
           repo[0]['DownloadLinkTesting'] = '${DOWNLOAD_URL}'
+          # Track the API level the build actually targets.
+          repo[0]['DalamudApiLevel'] = built['DalamudApiLevel']
+          # Surface the changelog from the source manifest in the installer list.
+          if 'Changelog' in source:
+              repo[0]['Changelog'] = source['Changelog']
           with open('repo.json', 'w') as f:
               json.dump(repo, f, indent=2)
               f.write('\n')
@@ -68,6 +79,33 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout main
+          # Re-run the update on main's repo.json so we don't overwrite later
+          # post-tag manual edits (e.g. fixing the API level for an old tag).
+          VERSION="${GITHUB_REF_NAME#v}"
+          TIMESTAMP=$(date +%s)
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/latest.zip"
+          BUILT_MANIFEST="XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.json"
+          SOURCE_MANIFEST="XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.json"
+          python3 -c "
+          import json
+          with open('repo.json', 'r') as f:
+              repo = json.load(f)
+          with open('${BUILT_MANIFEST}', 'r') as f:
+              built = json.load(f)
+          with open('${SOURCE_MANIFEST}', 'r') as f:
+              source = json.load(f)
+          repo[0]['AssemblyVersion'] = '${VERSION}.0'
+          repo[0]['LastUpdate'] = int(${TIMESTAMP})
+          repo[0]['DownloadLinkInstall'] = '${DOWNLOAD_URL}'
+          repo[0]['DownloadLinkUpdate'] = '${DOWNLOAD_URL}'
+          repo[0]['DownloadLinkTesting'] = '${DOWNLOAD_URL}'
+          repo[0]['DalamudApiLevel'] = built['DalamudApiLevel']
+          if 'Changelog' in source:
+              repo[0]['Changelog'] = source['Changelog']
+          with open('repo.json', 'w') as f:
+              json.dump(repo, f, indent=2)
+              f.write('\n')
+          "
           git add repo.json
           git commit -m "release: update repo.json for ${GITHUB_REF_NAME}"
           git push origin main
