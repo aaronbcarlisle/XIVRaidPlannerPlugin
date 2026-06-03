@@ -3,12 +3,12 @@
     "Author": "FFXIV Raid Planner",
     "Name": "XIV Raid Planner",
     "InternalName": "XIVRaidPlannerPlugin",
-    "AssemblyVersion": "0.3.0.0",
+    "AssemblyVersion": "0.3.1.0",
     "Punchline": "In-game loot priority overlay and auto-logging for FFXIV Raid Planner.",
     "Description": "Displays loot priority rankings during savage raids and auto-logs loot drops to your FFXIV Raid Planner static. Requires an API key from the web app.\n\nCommands:\n/xrp - Toggle BiS gear viewer\n/xrp priority - Toggle priority overlay\n/xrp sync - Sync equipped gear to web app\n/xrp config - Open configuration",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 15,
-    "Changelog": "v0.3.1 — Plugin modernization\n\nNew\n- Sign in with browser: one-click PKCE loopback flow mints an API key without copy/paste. Open /xrp config → Connection → Sign in with browser.\n- Auto-detect your player: the plugin matches your character to a planner roster entry on sign-in and on static/tier changes.\n- BiS auto-loads on startup so vendor highlighting works without opening the BiS window first.\n- Bare /xrp now opens the BiS viewer; /xrp priority toggles the priority overlay.\n- Shop and Need/Greed highlighting fixed (correct ItemId offsets + filter list — no more wrong items).\n\nFixes & polish\n- SDK 15 / .NET 9 build, full service refactor, 28 unit tests, CI build/test/format gate.\n- Race-safe browser sign-in (atomic code exchange, per-user key limit, ASCII validation).\n- Stale priority cleared on savage exit; background sign-in chain cancellable on quick exit.\n- Plugin warns about unclaimed loot before you leave a savage instance.\n\nv0.3.1 republishes v0.3.0 with the in-game Changelog section and correct DalamudApiLevel metadata.",
+    "Changelog": "v0.3.1 \u2014 Plugin modernization\n\nNew\n- Sign in with browser: one-click PKCE loopback flow mints an API key without copy/paste. Open /xrp config \u2192 Connection \u2192 Sign in with browser.\n- Auto-detect your player: the plugin matches your character to a planner roster entry on sign-in and on static/tier changes.\n- BiS auto-loads on startup so vendor highlighting works without opening the BiS window first.\n- Bare /xrp now opens the BiS viewer; /xrp priority toggles the priority overlay.\n- Shop and Need/Greed highlighting fixed (correct ItemId offsets + filter list \u2014 no more wrong items).\n\nFixes & polish\n- SDK 15 / .NET 9 build, full service refactor, 28 unit tests, CI build/test/format gate.\n- Race-safe browser sign-in (atomic code exchange, per-user key limit, ASCII validation).\n- Stale priority cleared on savage exit; background sign-in chain cancellable on quick exit.\n- Plugin warns about unclaimed loot before you leave a savage instance.\n\nv0.3.1 republishes v0.3.0 with the in-game Changelog section and correct DalamudApiLevel metadata.",
     "Tags": [
       "raid",
       "loot",
@@ -22,10 +22,10 @@
     "IsHide": false,
     "IsTestingExclusive": false,
     "DownloadCount": 0,
-    "LastUpdate": 1780473599,
-    "DownloadLinkInstall": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.0/latest.zip",
-    "DownloadLinkTesting": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.0/latest.zip",
+    "LastUpdate": 1780474694,
+    "DownloadLinkInstall": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
+    "DownloadLinkTesting": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
     "IconUrl": "https://raw.githubusercontent.com/aaronbcarlisle/XIVRaidPlannerPlugin/main/XIVRaidPlannerPlugin/images/icon.png"
   }
 ]
