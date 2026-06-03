@@ -409,9 +409,9 @@ public class RaidPlannerClient : IDisposable
 
     /// <summary>
     /// Test-only entry point: exercises the status → ApiError mapping via a stub HttpMessageHandler.
-    /// Not for production use.
+    /// Not for production use. Visible to XIVRaidPlannerPlugin.Tests via InternalsVisibleTo.
     /// </summary>
-    public static async Task<ApiResult<UserInfo>> SendForTest(HttpMessageHandler handler, string endpoint)
+    internal static async Task<ApiResult<UserInfo>> SendForTest(HttpMessageHandler handler, string endpoint)
     {
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://test.local") };
         var resp = await client.GetAsync(endpoint);
