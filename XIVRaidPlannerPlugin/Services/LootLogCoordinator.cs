@@ -413,7 +413,13 @@ public sealed class LootLogCoordinator
             }
 
             if (logged > 0)
-                _chat.Print($"[XRP] Logged {logged} gear acquisition(s).");
+            {
+                // LogNewAcquisitionsAsync is invoked from GearSyncService's RunBackground
+                // continuation, so we must marshal the chat print onto the framework thread
+                // (matches every other _chat.Print call in this coordinator).
+                var loggedCount = logged;
+                _thread.RunOnUi(() => _chat.Print($"[XRP] Logged {loggedCount} gear acquisition(s)."));
+            }
         }
         catch (Exception ex)
         {
