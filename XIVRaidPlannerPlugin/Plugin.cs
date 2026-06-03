@@ -266,22 +266,32 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>
     /// Refresh BiS gear data on viewer open and on the Refresh button. Fetches the
     /// player ID we were last viewing (so dropdown selections persist across reopens),
-    /// or the current player if none was selected.
+    /// or the current player if none was selected. Decides isCurrent based on the
+    /// local character's planner-side link rather than the cached CurrentPlayerGear,
+    /// because the latter is null between refreshes when the cache is invalidated.
     /// </summary>
     private void OnBisRefreshRequested(string? playerId)
     {
         _thread.RunBackground(async () =>
         {
+            var localName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+            var localLinkedId = !string.IsNullOrEmpty(localName)
+                ? _partyMatching.GetPlayerIdForName(localName)
+                : null;
+
             if (!string.IsNullOrEmpty(playerId))
             {
-                var isCurrent = _bisData.CurrentPlayerGear?.PlayerId == playerId;
-                await _bisData.FetchPlayerGearAsync(playerId, isCurrentPlayer: isCurrent);
+                var isCurrent = !string.IsNullOrEmpty(localLinkedId) && playerId == localLinkedId;
+                await _bisData.FetchPlayerGearAsync(playerId, isCurrentPlayer: isCurrent, forceRefresh: true);
             }
-            else
+            else if (!string.IsNullOrEmpty(localLinkedId))
             {
-                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
-                if (!string.IsNullOrEmpty(charName))
-                    await _bisData.FetchCurrentPlayerGearAsync(charName);
+                // Bare refresh with no remembered viewed player — refresh the local user.
+                await _bisData.FetchPlayerGearAsync(localLinkedId, isCurrentPlayer: true, forceRefresh: true);
+            }
+            else if (!string.IsNullOrEmpty(localName))
+            {
+                await _bisData.FetchCurrentPlayerGearAsync(localName);
             }
         });
     }

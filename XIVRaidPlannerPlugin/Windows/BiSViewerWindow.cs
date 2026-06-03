@@ -212,10 +212,9 @@ public class BiSViewerWindow : Window, IDisposable
                     // the previous self-view's items in the new player's right column.
                     _equippedGear = null;
                     _equippedGearStale = true;
-                    // Force a fresh fetch — the cached entry might be from when this player
-                    // hadn't yet synced their gear.
-                    _bisData.InvalidatePlayer(players[i].Id);
-                    _ = _bisData.FetchPlayerGearAsync(players[i].Id);
+                    // Plugin.cs handles the force-refresh (and decides isCurrent BEFORE any
+                    // cache invalidation, so the Sync Gear button doesn't disappear).
+                    OnRefreshRequested?.Invoke(players[i].Id);
                 }
                 ImGui.PopStyleColor();
                 if (i == idx) ImGui.SetItemDefaultFocus();
@@ -253,7 +252,10 @@ public class BiSViewerWindow : Window, IDisposable
         ImGui.SameLine(); ImGui.TextColored(ColorTextMuted, " | "); ImGui.SameLine();
         if (ImGui.SmallButton("Refresh"))
         {
-            _bisData.InvalidatePlayer(gear.PlayerId);
+            // Don't call InvalidatePlayer here — it nulls CurrentPlayerGear, which makes
+            // IsViewingSelf return false and hides the Sync Gear button. Plugin.cs decides
+            // isCurrent BEFORE bypassing the cache, then forces a fresh fetch through the
+            // dedicated forceRefresh path on FetchPlayerGearAsync.
             _equippedGear = null;
             _equippedGearStale = true;
             OnRefreshRequested?.Invoke(gear.PlayerId);

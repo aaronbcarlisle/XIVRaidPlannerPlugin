@@ -83,7 +83,10 @@ public class BiSDataService
     /// <summary>
     /// Fetch gear for a specific player ID (used by Lead/Owner dropdown).
     /// </summary>
-    public async Task FetchPlayerGearAsync(string playerId, bool isCurrentPlayer = false)
+    /// <param name="forceRefresh">If true, bypass the cache and always hit the API.
+    /// Used by the BiS viewer's Refresh button and the party dropdown so the user
+    /// sees the latest gear without the stale cached copy short-circuiting.</param>
+    public async Task FetchPlayerGearAsync(string playerId, bool isCurrentPlayer = false, bool forceRefresh = false)
     {
         // Current-player fetches wait; non-current-player fetches bail if busy
         if (isCurrentPlayer)
@@ -96,8 +99,8 @@ public class BiSDataService
 
         try
         {
-            // Check cache first
-            if (_gearCache.TryGetValue(playerId, out var cached))
+            // Check cache first (unless a forced refresh was requested).
+            if (!forceRefresh && _gearCache.TryGetValue(playerId, out var cached))
             {
                 if (isCurrentPlayer)
                 {
