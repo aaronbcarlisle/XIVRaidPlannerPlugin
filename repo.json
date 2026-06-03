@@ -3,7 +3,7 @@
     "Author": "FFXIV Raid Planner",
     "Name": "XIV Raid Planner",
     "InternalName": "XIVRaidPlannerPlugin",
-    "AssemblyVersion": "0.3.1.0",
+    "AssemblyVersion": "0.3.2.0",
     "Punchline": "In-game loot priority overlay and auto-logging for FFXIV Raid Planner.",
     "Description": "Displays loot priority rankings during savage raids and auto-logs loot drops to your FFXIV Raid Planner static. Requires an API key from the web app.\n\nCommands:\n/xrp - Toggle BiS gear viewer\n/xrp priority - Toggle priority overlay\n/xrp sync - Sync equipped gear to web app\n/xrp config - Open configuration",
     "ApplicableVersion": "any",
@@ -22,10 +22,10 @@
     "IsHide": false,
     "IsTestingExclusive": false,
     "DownloadCount": 0,
-    "LastUpdate": 1780474694,
-    "DownloadLinkInstall": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
-    "DownloadLinkTesting": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.1/latest.zip",
+    "LastUpdate": 1780476192,
+    "DownloadLinkInstall": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.2/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.2/latest.zip",
+    "DownloadLinkTesting": "https://github.com/aaronbcarlisle/XIVRaidPlannerPlugin/releases/download/v0.3.2/latest.zip",
     "IconUrl": "https://raw.githubusercontent.com/aaronbcarlisle/XIVRaidPlannerPlugin/main/XIVRaidPlannerPlugin/Images/icon.png"
   }
 ]
