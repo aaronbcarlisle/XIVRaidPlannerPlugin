@@ -5,7 +5,7 @@ using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using AtkValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
+using AtkValueType = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType;
 
 namespace XIVRaidPlannerPlugin.Services;
 
@@ -33,17 +33,36 @@ public unsafe class AddonHighlightService : IDisposable
     private readonly HashSet<int> _bisListItemIndices = new();
 
     // ==================== ShopExchangeItem Constants (from BisBuddy) ====================
-    // Item count at AtkValues[3], item IDs starting at AtkValues[1064]
-    // Tree list component at node ID 20
+    // - Item count at AtkValues[3]
+    // - Item IDs starting at AtkValues[1066]
+    // - Per-item visibility values starting at AtkValues[1554]; <= 1 means visible
+    // - Tree list component at node ID 20
+    //
+    // The visibility list is critical: tree row ListItemIndex is a *compressed* index
+    // across only the currently-visible items (i.e. matches whatever sub-section /
+    // filter the player picked in the shop). Without it, BiS matches map to the wrong
+    // tree rows in any multi-section shop.
+    //
+    // NOTE: These AtkValue offsets are tied to the FFXIV CLIENT version (the in-game
+    // shop addon layout), not the Dalamud SDK version. They are NOT updated by SDK
+    // bumps — they need re-verification after a major game patch that touches shop UI.
+    // If shop highlighting stops working after a game patch, suspect these constants
+    // before suspecting the rest of this file. Values cross-referenced against
+    // BisBuddy (RajahOmen/BisBuddy) which uses the same reverse-engineered layout.
     private const int ShopExchItemCountIdx = 3;
-    private const int ShopExchItemIdStart = 1064;
+    private const int ShopExchItemIdStart = 1066;
+    private const int ShopExchFilterStart = 1554;
     private const uint ShopExchTreeListNodeId = 20;
 
     // ==================== ShopExchangeCurrency Constants (from BisBuddy) ====================
-    // Item count at AtkValues[4], item IDs starting at AtkValues[1064]
+    // Same layout as ShopExchangeItem except item count lives at AtkValues[4].
     private const int ShopCurrItemCountIdx = 4;
-    private const int ShopCurrItemIdStart = 1064;
+    private const int ShopCurrItemIdStart = 1066;
+    private const int ShopCurrFilterStart = 1554;
     private const uint ShopCurrTreeListNodeId = 20;
+
+    // Items with filter value > this are filtered out and NOT rendered in the tree.
+    private const uint ShopFilterVisibleMaxValue = 1;
 
     // ==================== NeedGreed Constants (from BisBuddy) ====================
     // Uses typed AddonNeedGreed struct, list component at node ID 6
@@ -164,7 +183,7 @@ public unsafe class AddonHighlightService : IDisposable
             }
 
             HighlightShopItems(addon, addonName,
-                ShopExchItemCountIdx, ShopExchItemIdStart, ShopExchTreeListNodeId);
+                ShopExchItemCountIdx, ShopExchItemIdStart, ShopExchFilterStart, ShopExchTreeListNodeId);
         }
         catch (Exception ex)
         {
@@ -194,7 +213,7 @@ public unsafe class AddonHighlightService : IDisposable
             }
 
             HighlightShopItems(addon, addonName,
-                ShopCurrItemCountIdx, ShopCurrItemIdStart, ShopCurrTreeListNodeId);
+                ShopCurrItemCountIdx, ShopCurrItemIdStart, ShopCurrFilterStart, ShopCurrTreeListNodeId);
         }
         catch (Exception ex)
         {
@@ -205,11 +224,12 @@ public unsafe class AddonHighlightService : IDisposable
     // ==================== Shared Shop Highlighting ====================
 
     /// <summary>
-    /// Highlight BiS items in a ShopExchange addon using AtkValues for item IDs
-    /// and AtkComponentTreeList for accessing visible item renderers.
+    /// Highlight BiS items in a ShopExchange addon. Maps raw AtkValues item indices
+    /// to the *compressed* (filtered/visible) index that the tree's ListItemIndex
+    /// uses, so we highlight the correct row even when a sub-section is selected.
     /// </summary>
     private void HighlightShopItems(AtkUnitBase* addon, string addonName,
-        int itemCountIdx, int itemIdStart, uint treeListNodeId)
+        int itemCountIdx, int itemIdStart, int filterStart, uint treeListNodeId)
     {
         var atkValues = addon->AtkValuesSpan;
         if (atkValues.Length <= itemCountIdx)
@@ -226,21 +246,26 @@ public unsafe class AddonHighlightService : IDisposable
         }
 
         // Detect if a shield item is present (indented under a 1H weapon).
-        // Shields are stored at the END of the item ID list (at itemIdStart + itemCount)
-        // but visually appear at position 1 (AddonShieldIndex), shifting all other indices by +1.
+        // Shields are stored at the END of the item ID list (at itemIdStart + itemCount).
+        // The visible row sits at position 1 (AddonShieldIndex), shifting subsequent
+        // visible indices by +1. We also require the shield to be filter-visible.
         const int addonShieldIndex = 1;
         var shieldPresent = false;
         var shieldIdx = itemIdStart + itemCount;
+        var shieldFilterIdx = filterStart + itemCount;
         if (shieldIdx < atkValues.Length
+            && shieldFilterIdx < atkValues.Length
             && atkValues[shieldIdx].Type == AtkValueType.UInt
-            && atkValues[shieldIdx].UInt > 0)
+            && atkValues[shieldIdx].UInt > 0
+            && atkValues[shieldFilterIdx].Type == AtkValueType.UInt
+            && atkValues[shieldFilterIdx].UInt <= ShopFilterVisibleMaxValue)
         {
             shieldPresent = true;
             if (!_loggedBisItems.Contains(addonName))
                 _log.Info($"[Highlight] {addonName}: shield detected at AtkValues[{shieldIdx}] (ID={atkValues[shieldIdx].UInt})");
         }
 
-        // Build set of BiS ListItemIndex values (accounting for shield offset)
+        // Build set of BiS ListItemIndex values (filter-compressed, with shield offset)
         _bisListItemIndices.Clear();
         for (var i = 0; i < itemCount; i++)
         {
@@ -249,18 +274,24 @@ public unsafe class AddonHighlightService : IDisposable
 
             var v = atkValues[idx];
             if (v.Type != AtkValueType.UInt) continue;
+            if (!_itemMapping.IsBisItem(v.UInt)) continue;
 
-            if (_itemMapping.IsBisItem(v.UInt))
+            // Compute the compressed (filtered) tree index. If the item is currently
+            // filtered out of view, GetFilteredIndex returns -1 and we skip it.
+            var filteredIdx = GetFilteredIndex(i, filterStart, atkValues);
+            if (filteredIdx < 0)
             {
-                // When a shield is present and this item is at or after the shield position,
-                // the visual ListItemIndex is shifted by +1
-                var shieldOffset = (shieldPresent && i >= addonShieldIndex) ? 1 : 0;
-                var listItemIdx = i + shieldOffset;
-                _bisListItemIndices.Add(listItemIdx);
-
                 if (!_loggedBisItems.Contains(addonName))
-                    _log.Info($"[Highlight] {addonName}: BiS ID={v.UInt} atkIdx={i} -> listItemIdx={listItemIdx} (shieldOffset={shieldOffset})");
+                    _log.Info($"[Highlight] {addonName}: BiS ID={v.UInt} atkIdx={i} -> hidden by filter");
+                continue;
             }
+
+            var shieldOffset = (shieldPresent && i >= addonShieldIndex) ? 1 : 0;
+            var listItemIdx = filteredIdx + shieldOffset;
+            _bisListItemIndices.Add(listItemIdx);
+
+            if (!_loggedBisItems.Contains(addonName))
+                _log.Info($"[Highlight] {addonName}: BiS ID={v.UInt} atkIdx={i} -> listItemIdx={listItemIdx} (filtered={filteredIdx}, shieldOffset={shieldOffset})");
         }
 
         // Also check the shield item itself (stored at itemIdStart + itemCount)
@@ -329,6 +360,31 @@ public unsafe class AddonHighlightService : IDisposable
             else
                 RestoreNodeRecursive(addonName, ownerNode);
         }
+    }
+
+    /// <summary>
+    /// Convert a raw AtkValues item index into the *compressed* (visible) index that
+    /// the tree's ListItemIndex uses. Items filtered out of the current view are
+    /// skipped — they have a filter value above <see cref="ShopFilterVisibleMaxValue"/>.
+    /// Returns -1 if the item itself is hidden by the filter.
+    /// </summary>
+    private static int GetFilteredIndex(int index, int filterStart, System.Span<FFXIVClientStructs.FFXIV.Component.GUI.AtkValue> atkValues)
+    {
+        if (atkValues.Length <= filterStart + index) return -1;
+
+        var self = atkValues[filterStart + index];
+        if (self.Type != AtkValueType.UInt || self.UInt > ShopFilterVisibleMaxValue) return -1;
+
+        var visibleCount = 0;
+        for (var i = 0; i < index; i++)
+        {
+            var slot = filterStart + i;
+            if (slot >= atkValues.Length) break;
+            var v = atkValues[slot];
+            if (v.Type == AtkValueType.UInt && v.UInt <= ShopFilterVisibleMaxValue)
+                visibleCount++;
+        }
+        return visibleCount;
     }
 
     // ==================== Color Tinting ====================

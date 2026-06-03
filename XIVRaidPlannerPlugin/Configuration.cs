@@ -1,7 +1,7 @@
-using Dalamud.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using Dalamud.Configuration;
 
 namespace XIVRaidPlannerPlugin;
 

@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
-using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
 
 namespace XIVRaidPlannerPlugin.Windows;
@@ -16,16 +17,30 @@ namespace XIVRaidPlannerPlugin.Windows;
 /// </summary>
 public class PriorityOverlayWindow : Window, IDisposable
 {
-    private static Dictionary<string, Vector4> RoleColors => GameConstants.RoleColors;
-
     // Job abbreviation -> ClassJob ID (for icon lookup: 62100 + ID = framed icon)
     private static readonly Dictionary<string, uint> JobIconIds = new()
     {
-        ["PLD"] = 19, ["WAR"] = 21, ["DRK"] = 32, ["GNB"] = 37,
-        ["WHM"] = 24, ["SCH"] = 28, ["AST"] = 33, ["SGE"] = 40,
-        ["MNK"] = 20, ["DRG"] = 22, ["NIN"] = 30, ["SAM"] = 34, ["RPR"] = 39, ["VPR"] = 41,
-        ["BRD"] = 23, ["MCH"] = 31, ["DNC"] = 38,
-        ["BLM"] = 25, ["SMN"] = 27, ["RDM"] = 35, ["PCT"] = 42,
+        ["PLD"] = 19,
+        ["WAR"] = 21,
+        ["DRK"] = 32,
+        ["GNB"] = 37,
+        ["WHM"] = 24,
+        ["SCH"] = 28,
+        ["AST"] = 33,
+        ["SGE"] = 40,
+        ["MNK"] = 20,
+        ["DRG"] = 22,
+        ["NIN"] = 30,
+        ["SAM"] = 34,
+        ["RPR"] = 39,
+        ["VPR"] = 41,
+        ["BRD"] = 23,
+        ["MCH"] = 31,
+        ["DNC"] = 38,
+        ["BLM"] = 25,
+        ["SMN"] = 27,
+        ["RDM"] = 35,
+        ["PCT"] = 42,
     };
 
     // Gear slot icon names (loaded from embedded resources)
@@ -45,22 +60,11 @@ public class PriorityOverlayWindow : Window, IDisposable
 
     private static Dictionary<string, string[]> MaterialSlotOptions => GameConstants.MaterialSlotOptions;
 
-    private static readonly Vector4 ColorAccent = new(0.298f, 0.722f, 0.659f, 1f);
-    private static readonly Vector4 ColorSuccess = new(0.133f, 0.773f, 0.369f, 1f);
-    private static readonly Vector4 ColorError = new(0.937f, 0.267f, 0.267f, 1f);
     private static readonly Vector4 ColorMuted = new(0.4f, 0.4f, 0.45f, 1f);
     private static readonly Vector4 ColorLink = new(0.4f, 0.7f, 1.0f, 1f);
 
-    // Floor colors matching the web app design system
-    private static readonly Dictionary<int, Vector4> FloorColors = new()
-    {
-        [1] = new Vector4(0.133f, 0.773f, 0.369f, 1f),  // #22c55e - Floor 1 (Accessories)
-        [2] = new Vector4(0.231f, 0.510f, 0.965f, 1f),  // #3b82f6 - Floor 2 (Left Side)
-        [3] = new Vector4(0.659f, 0.333f, 0.969f, 1f),  // #a855f7 - Floor 3 (Body)
-        [4] = new Vector4(0.961f, 0.620f, 0.043f, 1f),  // #f59e0b - Floor 4 (Weapon)
-    };
-
     private readonly Configuration _config;
+    private readonly ITextureProvider _textureProvider;
 
     private PriorityResponse? _priorityData;
     private string? _currentFloorKey;
@@ -108,11 +112,12 @@ public class PriorityOverlayWindow : Window, IDisposable
     /// <summary>Fired when user clicks the refresh button.</summary>
     public event Action? OnRefresh;
 
-    public PriorityOverlayWindow(Configuration config)
+    public PriorityOverlayWindow(Configuration config, ITextureProvider textureProvider)
         : base("XIV Raid Planner",
             ImGuiWindowFlags.NoCollapse)
     {
         _config = config;
+        _textureProvider = textureProvider;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -128,14 +133,14 @@ public class PriorityOverlayWindow : Window, IDisposable
         foreach (var name in SlotIconNames)
         {
             var resourceName = $"XIVRaidPlannerPlugin.Images.slots.{name}.png";
-            _slotIcons[name] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
+            _slotIcons[name] = _textureProvider.GetFromManifestResource(assembly, resourceName);
         }
 
         // Load job icons from embedded resources
         foreach (var (abbrev, fileName) in JobIconFileNames)
         {
             var resourceName = $"XIVRaidPlannerPlugin.Images.jobs.{fileName}.png";
-            _jobIcons[abbrev.ToUpperInvariant()] = Plugin.TextureProvider.GetFromManifestResource(assembly, resourceName);
+            _jobIcons[abbrev.ToUpperInvariant()] = _textureProvider.GetFromManifestResource(assembly, resourceName);
         }
     }
 
@@ -178,20 +183,20 @@ public class PriorityOverlayWindow : Window, IDisposable
     public void MarkAsLogged(string playerId, string slot, string playerName)
     {
         _loggedEntries.Add($"{playerId}|{slot}");
-        ShowStatus($"Logged {FormatDropName(slot)} -> {playerName}", ColorSuccess);
+        ShowStatus($"Logged {FormatDropName(slot)} -> {playerName}", Theme.Success);
     }
 
     /// <summary>Show a log failure message.</summary>
     public void MarkLogFailed(string slot, string playerName)
     {
-        ShowStatus($"Failed to log {FormatDropName(slot)} -> {playerName}", ColorError);
+        ShowStatus($"Failed to log {FormatDropName(slot)} -> {playerName}", Theme.Error);
     }
 
     /// <summary>Mark the floor as successfully cleared.</summary>
     public void MarkFloorCleared()
     {
         _floorCleared = true;
-        ShowStatus($"{_floorName} marked as cleared!", ColorSuccess);
+        ShowStatus($"{_floorName} marked as cleared!", Theme.Success);
     }
 
     public void ShowStatus(string message, Vector4 color)
@@ -205,7 +210,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     {
         if (_priorityData == null || _currentFloorKey == null)
         {
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Waiting for priority data...");
+            ImGui.TextColored(Theme.Warning, "Waiting for priority data...");
             return;
         }
 
@@ -216,7 +221,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         }
 
         // Subheader: tier name - floor name in floor color (Ctrl+Click to open web app), week in gray
-        var floorColor = FloorColors.GetValueOrDefault(_currentFloor, ColorAccent);
+        var floorColor = Theme.FloorColor(_currentFloor);
         if (!string.IsNullOrEmpty(_tierName))
         {
             var tierUrl = BuildWebAppUrl();
@@ -408,7 +413,7 @@ public class PriorityOverlayWindow : Window, IDisposable
 
         if (ImGui.BeginPopup("material_slot_select"))
         {
-            ImGui.TextColored(ColorAccent, $"{FormatDropName(_pendingMaterialSlot)} -> {_pendingMaterialPlayerName}");
+            ImGui.TextColored(Theme.Accent, $"{FormatDropName(_pendingMaterialSlot)} -> {_pendingMaterialPlayerName}");
             ImGui.Separator();
             ImGui.TextDisabled("Augment which slot?");
 
@@ -456,7 +461,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         {
             if (_confirmAction == ConfirmAction.LogLoot)
             {
-                ImGui.TextColored(ColorAccent, $"Log {FormatDropName(_confirmSlot)} \u2192 {_confirmPlayerName}?");
+                ImGui.TextColored(Theme.Accent, $"Log {FormatDropName(_confirmSlot)} \u2192 {_confirmPlayerName}?");
                 ImGui.Separator();
                 ImGui.Spacing();
                 ImGui.TextWrapped($"This will record {_confirmPlayerName} received {FormatDropName(_confirmSlot)} from {_floorName}.");
@@ -468,7 +473,7 @@ public class PriorityOverlayWindow : Window, IDisposable
             }
             else if (_confirmAction == ConfirmAction.ClearFloor)
             {
-                ImGui.TextColored(ColorAccent, $"Mark {_floorName} as cleared?");
+                ImGui.TextColored(Theme.Accent, $"Mark {_floorName} as cleared?");
                 ImGui.Separator();
                 ImGui.Spacing();
                 ImGui.TextWrapped($"This will mark {_floorName} as cleared for all 8 players. Everyone will receive books for this week.");
@@ -509,7 +514,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         // Bottom bar: floor cleared + refresh
         if (_floorCleared)
         {
-            ImGui.TextColored(ColorSuccess, $"{_floorName} Cleared");
+            ImGui.TextColored(Theme.Success, $"{_floorName} Cleared");
         }
         else
         {
@@ -526,7 +531,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         if (ImGui.SmallButton("Refresh"))
         {
             OnRefresh?.Invoke();
-            ShowStatus("Refreshing priority data...", ColorAccent);
+            ShowStatus("Refreshing priority data...", Theme.Accent);
         }
 
         // Ctrl+Click hint
@@ -539,7 +544,7 @@ public class PriorityOverlayWindow : Window, IDisposable
     private void DrawJobIcon(string jobAbbrev, Vector2 size, bool dimmed = false)
     {
         var key = jobAbbrev.ToUpperInvariant();
-        var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : new Vector4(1, 1, 1, 1);
+        var tint = dimmed ? new Vector4(0.5f, 0.5f, 0.5f, 0.6f) : Theme.White;
 
         // Try embedded icon first
         if (_jobIcons.TryGetValue(key, out var embeddedTex) && embeddedTex != null)
@@ -556,7 +561,7 @@ public class PriorityOverlayWindow : Window, IDisposable
         if (JobIconIds.TryGetValue(key, out var jobId))
         {
             var iconId = 62100u + jobId;
-            var tex = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrEmpty();
+            var tex = _textureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrEmpty();
             ImGui.Image(tex.Handle, size, new Vector2(0, 0), new Vector2(1, 1), tint);
         }
         else
@@ -577,7 +582,7 @@ public class PriorityOverlayWindow : Window, IDisposable
             _ => "melee",
         };
 
-        return RoleColors.GetValueOrDefault(role, new Vector4(1, 1, 1, 1));
+        return Theme.RoleColor(role);
     }
 
     private static string FormatDropName(string drop)

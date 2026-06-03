@@ -100,9 +100,18 @@ public class TerritoryService : IDisposable
     // Ordinal words to numbers for duty names like "The Ninth Circle (Savage)"
     private static readonly Dictionary<string, int> Ordinals = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["First"] = 1, ["Second"] = 2, ["Third"] = 3, ["Fourth"] = 4,
-        ["Fifth"] = 5, ["Sixth"] = 6, ["Seventh"] = 7, ["Eighth"] = 8,
-        ["Ninth"] = 9, ["Tenth"] = 10, ["Eleventh"] = 11, ["Twelfth"] = 12,
+        ["First"] = 1,
+        ["Second"] = 2,
+        ["Third"] = 3,
+        ["Fourth"] = 4,
+        ["Fifth"] = 5,
+        ["Sixth"] = 6,
+        ["Seventh"] = 7,
+        ["Eighth"] = 8,
+        ["Ninth"] = 9,
+        ["Tenth"] = 10,
+        ["Eleventh"] = 11,
+        ["Twelfth"] = 12,
     };
 
     private static (int Floor, string Name)? ParseSavageDutyName(string dutyName)
@@ -160,7 +169,7 @@ public class TerritoryService : IDisposable
         return null;
     }
 
-    private void OnTerritoryChanged(ushort territoryId)
+    private void OnTerritoryChanged(uint territoryId)
     {
         if (_savageTerritories.TryGetValue(territoryId, out var info))
         {

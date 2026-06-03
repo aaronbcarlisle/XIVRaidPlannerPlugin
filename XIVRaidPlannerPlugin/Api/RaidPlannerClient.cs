@@ -1,10 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 
 namespace XIVRaidPlannerPlugin.Api;
@@ -12,6 +13,7 @@ namespace XIVRaidPlannerPlugin.Api;
 /// <summary>
 /// HTTP client wrapper for the FFXIV Raid Planner API.
 /// All calls use the configured API key for authentication.
+/// All public methods return <see cref="ApiResult{T}"/> with categorized errors.
 /// </summary>
 public class RaidPlannerClient : IDisposable
 {
@@ -45,34 +47,75 @@ public class RaidPlannerClient : IDisposable
     private HttpClient CreateHttpClient()
     {
         var baseUrl = _config.EffectiveApiBaseUrl.TrimEnd('/');
-        var client = new HttpClient { BaseAddress = new Uri(baseUrl) };
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        var client = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(15) };
+        if (!string.IsNullOrEmpty(_config.ApiKey))
+        {
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        }
         return client;
     }
+
+    // ==================== Status → Error Mapper ====================
+
+    private static ApiError MapStatus(System.Net.HttpStatusCode code) => (int)code switch
+    {
+        401 or 403 => ApiError.Unauthorized,
+        404 => ApiError.NotFound,
+        >= 500 => ApiError.Server,
+        _ => ApiError.Unknown,
+    };
+
+    // ==================== Tier Resolution ====================
+
+    /// <summary>
+    /// User-visible warning from the last tier-resolution attempt. Set when the
+    /// resolver had to fall back to the most-recent tier because no tier in the
+    /// static is flagged active — the UI surfaces this so the user isn't silently
+    /// pointed at an arbitrary tier when the static owner forgot to mark one active.
+    /// Cleared whenever a real active tier is resolved successfully.
+    /// </summary>
+    public string? LastTierResolutionWarning { get; private set; }
 
     /// <summary>
     /// Resolve the active tier ID for a group when no tier is explicitly configured.
     /// Caches the result per group to avoid repeated /tiers network calls in Auto mode.
     /// </summary>
-    private async Task<string?> ResolveActiveTierIdAsync(string groupId)
+    private async Task<ApiResult<string>> ResolveActiveTierIdAsync(string groupId, CancellationToken ct = default)
     {
         // Return cached result if same group
         if (_cachedResolvedTierId != null && _cachedResolvedGroupId == groupId)
-            return _cachedResolvedTierId;
+            return ApiResult<string>.Ok(_cachedResolvedTierId);
 
-        var tiers = await GetTiersAsync(groupId);
+        var result = await GetTiersAsync(groupId, ct);
+        if (!result.IsSuccess) return ApiResult<string>.Fail(result.Error);
+
+        var tiers = result.Value!;
         var active = tiers.Find(t => t.IsActive);
         if (active != null)
         {
             _log.Information($"Resolved active tier: {active.TierId} ({active.Id})");
             _cachedResolvedTierId = active.Id;
             _cachedResolvedGroupId = groupId;
-            return active.Id;
+            LastTierResolutionWarning = null;
+            return ApiResult<string>.Ok(active.Id);
         }
 
-        _log.Warning("No active tier found for group");
-        return null;
+        // No tier flagged active — fall back to the most recent tier.
+        // Backend returns /tiers ordered by created_at DESC, so index 0 is newest.
+        if (tiers.Count > 0)
+        {
+            var fallback = tiers[0];
+            _log.Warning($"No active tier flagged for group; falling back to most recent: {fallback.TierId} ({fallback.Id})");
+            _cachedResolvedTierId = fallback.Id;
+            _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = $"No tier is marked active for this static. Using \"{fallback.TierId}\" (most recent) — ask the owner to mark a tier active in the web app, or pick one in the Static tab.";
+            return ApiResult<string>.Ok(fallback.Id);
+        }
+
+        _log.Warning("No tiers exist for group");
+        LastTierResolutionWarning = null;
+        return ApiResult<string>.Fail(ApiError.NotFound);
     }
 
     /// <summary>Clear the cached auto-resolved tier (e.g., on group change or instance exit).</summary>
@@ -80,221 +123,299 @@ public class RaidPlannerClient : IDisposable
     {
         _cachedResolvedTierId = null;
         _cachedResolvedGroupId = null;
+        LastTierResolutionWarning = null;
     }
 
     /// <summary>Resolve the active tier for a group, returning the full TierInfo for display purposes.</summary>
-    public async Task<TierInfo?> ResolveActiveTierAsync(string groupId)
+    public async Task<ApiResult<TierInfo>> ResolveActiveTierAsync(string groupId, CancellationToken ct = default)
     {
-        var tiers = await GetTiersAsync(groupId);
+        var result = await GetTiersAsync(groupId, ct);
+        if (!result.IsSuccess) return ApiResult<TierInfo>.Fail(result.Error);
+
+        var tiers = result.Value!;
         var active = tiers.Find(t => t.IsActive);
         if (active != null)
         {
             _cachedResolvedTierId = active.Id;
             _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = null;
+            return ApiResult<TierInfo>.Ok(active);
         }
-        return active;
+
+        // Fall back to most recent tier when none is flagged active (parity with ResolveActiveTierIdAsync).
+        if (tiers.Count > 0)
+        {
+            var fallback = tiers[0];
+            _cachedResolvedTierId = fallback.Id;
+            _cachedResolvedGroupId = groupId;
+            LastTierResolutionWarning = $"No tier is marked active for this static. Using \"{fallback.TierId}\" (most recent) — ask the owner to mark a tier active in the web app, or pick one in the Static tab.";
+            return ApiResult<TierInfo>.Ok(fallback);
+        }
+
+        return ApiResult<TierInfo>.Fail(ApiError.NotFound);
     }
 
     /// <summary>Resolve group and tier IDs, auto-detecting active tier when in Auto mode.</summary>
-    private async Task<(string? GroupId, string? TierId)> ResolveIdsAsync(string? groupId = null, string? tierId = null)
+    private async Task<ApiResult<(string GroupId, string TierId)>> ResolveIdsAsync(string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
         var gid = groupId ?? _config.DefaultGroupId;
         var tid = tierId ?? _config.DefaultTierId;
 
-        if (string.IsNullOrEmpty(tid) && !string.IsNullOrEmpty(gid))
-            tid = await ResolveActiveTierIdAsync(gid);
+        if (string.IsNullOrEmpty(gid))
+            return ApiResult<(string, string)>.Fail(ApiError.NotFound);
 
-        return (gid, tid);
+        if (string.IsNullOrEmpty(tid))
+        {
+            var resolved = await ResolveActiveTierIdAsync(gid, ct);
+            if (!resolved.IsSuccess)
+                return ApiResult<(string, string)>.Fail(resolved.Error);
+            tid = resolved.Value!;
+        }
+
+        return ApiResult<(string, string)>.Ok((gid, tid));
     }
 
     // ==================== Health ====================
 
-    public async Task<HealthResponse?> TestConnectionAsync()
+    public async Task<ApiResult<HealthResponse>> TestConnectionAsync(CancellationToken ct = default)
     {
-        try
-        {
-            var health = await GetAsync<HealthResponse>("/health");
-            if (health?.Status != "healthy")
-                return null;
+        var healthResult = await GetAsync<HealthResponse>("/health", ct);
+        if (!healthResult.IsSuccess) return healthResult;
+        if (healthResult.Value!.Status != "healthy")
+            return ApiResult<HealthResponse>.Fail(ApiError.Server);
 
-            // Also verify the API key works
-            await GetAsync<UserInfo>("/api/auth/me");
-            return health;
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"Connection test failed: {ex.Message}");
-            return null;
-        }
+        // Also verify the API key works
+        var authResult = await GetAsync<UserInfo>("/api/auth/me", ct);
+        if (!authResult.IsSuccess) return ApiResult<HealthResponse>.Fail(authResult.Error);
+
+        return healthResult;
     }
 
     // ==================== Static Groups ====================
 
-    public async Task<List<StaticGroupInfo>> GetStaticGroupsAsync()
+    public async Task<ApiResult<List<StaticGroupInfo>>> GetStaticGroupsAsync(CancellationToken ct = default)
     {
-        return await GetAsync<List<StaticGroupInfo>>("/api/static-groups") ?? new();
+        return await GetAsync<List<StaticGroupInfo>>("/api/static-groups", ct);
     }
 
     // ==================== Tiers ====================
 
-    public async Task<List<TierInfo>> GetTiersAsync(string groupId)
+    public async Task<ApiResult<List<TierInfo>>> GetTiersAsync(string groupId, CancellationToken ct = default)
     {
-        return await GetAsync<List<TierInfo>>($"/api/static-groups/{groupId}/tiers") ?? new();
+        return await GetAsync<List<TierInfo>>($"/api/static-groups/{groupId}/tiers", ct);
     }
 
     // ==================== Priority ====================
 
-    public async Task<PriorityResponse?> GetPriorityAsync(int? floor = null, string? groupId = null, string? tierId = null)
+    public async Task<ApiResult<PriorityResponse>> GetPriorityAsync(int? floor = null, string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(groupId, tierId);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return null;
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<PriorityResponse>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
 
         var url = $"/api/static-groups/{gid}/tiers/{tid}/priority";
         if (floor.HasValue)
             url += $"?floor={floor.Value}";
-        return await GetAsync<PriorityResponse>(url);
+        return await GetAsync<PriorityResponse>(url, ct);
     }
 
     // ==================== Current Week ====================
 
-    public async Task<CurrentWeekResponse?> GetCurrentWeekAsync()
+    public async Task<ApiResult<CurrentWeekResponse>> GetCurrentWeekAsync(CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync();
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return null;
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<CurrentWeekResponse>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await GetAsync<CurrentWeekResponse>(
-            $"/api/static-groups/{gid}/tiers/{tid}/current-week");
+            $"/api/static-groups/{gid}/tiers/{tid}/current-week", ct);
     }
 
     // ==================== Loot Logging ====================
 
-    public async Task<bool> CreateLootLogEntryAsync(LootLogCreateRequest request)
+    public async Task<ApiResult<bool>> CreateLootLogEntryAsync(LootLogCreateRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync();
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return false;
-        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request, ct);
     }
 
-    public async Task<bool> CreateMaterialLogEntryAsync(MaterialLogCreateRequest request)
+    public async Task<ApiResult<bool>> CreateMaterialLogEntryAsync(MaterialLogCreateRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync();
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return false;
-        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/material-log", request);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/material-log", request, ct);
     }
 
-    public async Task<bool> MarkFloorClearedAsync(MarkFloorClearedRequest request)
+    public async Task<ApiResult<bool>> MarkFloorClearedAsync(MarkFloorClearedRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync();
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return false;
-        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/mark-floor-cleared", request);
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/mark-floor-cleared", request, ct);
     }
 
     // ==================== Player Gear (BiS Tracking) ====================
 
-    public async Task<PlayerGearResponse?> GetPlayerGearAsync(string playerId, string? groupId = null, string? tierId = null)
+    public async Task<ApiResult<PlayerGearResponse>> GetPlayerGearAsync(string playerId, string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(groupId, tierId);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return null;
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<PlayerGearResponse>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await GetAsync<PlayerGearResponse>(
-            $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}/gear");
+            $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}/gear", ct);
     }
 
-    /// <summary>Sync player gear by updating their current equipment state.</summary>
-    public async Task<bool> SyncPlayerGearAsync(string playerId, SnapshotPlayerUpdateRequest request, string? groupId = null, string? tierId = null)
+    /// <summary>List snapshot players (with user_id) for the active static + tier — used by auto-detect.</summary>
+    public async Task<ApiResult<List<SnapshotPlayerSummary>>> GetSnapshotPlayersAsync(string? groupId = null, string? tierId = null, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync(groupId, tierId);
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return false;
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<List<SnapshotPlayerSummary>>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
+        return await GetAsync<List<SnapshotPlayerSummary>>(
+            $"/api/static-groups/{gid}/tiers/{tid}/players", ct);
+    }
+
+    /// <summary>Fetch the signed-in user's identity (used by auto-detect to match player ownership).</summary>
+    public async Task<ApiResult<UserInfo>> GetCurrentUserAsync(CancellationToken ct = default)
+        => await GetAsync<UserInfo>("/api/auth/me", ct);
+
+    /// <summary>Sync player gear by updating their current equipment state.</summary>
+    public async Task<ApiResult<bool>> SyncPlayerGearAsync(string playerId, SnapshotPlayerUpdateRequest request, string? groupId = null, string? tierId = null, CancellationToken ct = default)
+    {
+        var ids = await ResolveIdsAsync(groupId, tierId, ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         return await PutAsync(
             $"/api/static-groups/{gid}/tiers/{tid}/players/{playerId}",
-            request);
+            request, ct);
+    }
+
+    // ==================== Plugin Auth (PKCE exchange) ====================
+
+    /// <summary>
+    /// Exchange a browser-issued auth code + PKCE verifier for an xrp_ API key.
+    /// This endpoint is intentionally unauthenticated — the user is obtaining their first key.
+    /// </summary>
+    public async Task<ApiResult<string>> ExchangePluginAuthCodeAsync(string code, string codeVerifier, CancellationToken ct = default)
+    {
+        var body = new { code, code_verifier = codeVerifier };
+        var json = JsonSerializer.Serialize(body, JsonOptions);
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        try
+        {
+            var resp = await _httpClient.PostAsync("/api/auth/api-keys/plugin-auth/exchange", content, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                // Surface the server's reason (e.g. "Maximum of 10 active API keys per user",
+                // "Code already used", "PKCE verifier mismatch") so the failure mode is debuggable
+                // instead of collapsing every non-2xx into a generic "Sign-in failed" toast.
+                var errorBody = await resp.Content.ReadAsStringAsync(ct);
+                _log.Error($"POST /api/auth/api-keys/plugin-auth/exchange -> {(int)resp.StatusCode}: {errorBody}");
+                return ApiResult<string>.Fail(MapStatus(resp.StatusCode));
+            }
+            var payload = JsonSerializer.Deserialize<PluginAuthExchangeResponse>(
+                await resp.Content.ReadAsStringAsync(ct), JsonOptions);
+            return string.IsNullOrEmpty(payload?.ApiKey)
+                ? ApiResult<string>.Fail(ApiError.Unknown)
+                : ApiResult<string>.Ok(payload.ApiKey);
+        }
+        catch (TaskCanceledException) { return ApiResult<string>.Fail(ApiError.Network); }
+        catch (HttpRequestException) { return ApiResult<string>.Fail(ApiError.Network); }
+        catch (Exception ex)
+        {
+            _log.Error($"POST /api/auth/api-keys/plugin-auth/exchange: {ex.Message}");
+            return ApiResult<string>.Fail(ApiError.Unknown);
+        }
     }
 
     /// <summary>Log a vendor purchase (self-log for members).</summary>
-    public async Task<bool> CreatePurchaseLogEntryAsync(LootLogCreateRequest request)
+    public async Task<ApiResult<bool>> CreatePurchaseLogEntryAsync(LootLogCreateRequest request, CancellationToken ct = default)
     {
-        var (gid, tid) = await ResolveIdsAsync();
-        if (string.IsNullOrEmpty(gid) || string.IsNullOrEmpty(tid))
-            return false;
+        var ids = await ResolveIdsAsync(ct: ct);
+        if (!ids.IsSuccess) return ApiResult<bool>.Fail(ids.Error);
+        var (gid, tid) = ids.Value;
         request.Method = "purchase";
         request.Notes ??= "Auto-logged via Dalamud plugin";
-        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request);
+        return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request, ct);
     }
 
     // ==================== HTTP Helpers ====================
 
-    private async Task<T?> GetAsync<T>(string endpoint) where T : class
+    private async Task<ApiResult<T>> GetAsync<T>(string endpoint, CancellationToken ct = default) where T : class
     {
         try
         {
-            var response = await _httpClient.GetAsync(endpoint);
-            response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<T>(json, JsonOptions);
+            var response = await _httpClient.GetAsync(endpoint, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _log.Error($"GET {endpoint} -> {(int)response.StatusCode}");
+                return ApiResult<T>.Fail(MapStatus(response.StatusCode));
+            }
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var value = JsonSerializer.Deserialize<T>(json, JsonOptions);
+            return value is null ? ApiResult<T>.Fail(ApiError.Unknown) : ApiResult<T>.Ok(value);
         }
-        catch (HttpRequestException ex)
-        {
-            _log.Error($"GET {endpoint} failed: {ex.StatusCode} - {ex.Message}");
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"GET {endpoint} error: {ex.Message}");
-            return null;
-        }
+        catch (TaskCanceledException) { return ApiResult<T>.Fail(ApiError.Network); }
+        catch (HttpRequestException) { return ApiResult<T>.Fail(ApiError.Network); }
+        catch (Exception ex) { _log.Error($"GET {endpoint}: {ex.Message}"); return ApiResult<T>.Fail(ApiError.Unknown); }
     }
 
-    private async Task<bool> PostAsync<T>(string endpoint, T body)
+    private async Task<ApiResult<bool>> PostAsync<T>(string endpoint, T body, CancellationToken ct = default)
     {
         try
         {
             var json = JsonSerializer.Serialize(body, JsonOptions);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync(endpoint, content);
-            response.EnsureSuccessStatusCode();
-            return true;
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(endpoint, content, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _log.Error($"POST {endpoint} -> {(int)response.StatusCode}");
+                return ApiResult<bool>.Fail(MapStatus(response.StatusCode));
+            }
+            return ApiResult<bool>.Ok(true);
         }
-        catch (HttpRequestException ex)
-        {
-            _log.Error($"POST {endpoint} failed: {ex.StatusCode} - {ex.Message}");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"POST {endpoint} error: {ex.Message}");
-            return false;
-        }
+        catch (TaskCanceledException) { return ApiResult<bool>.Fail(ApiError.Network); }
+        catch (HttpRequestException) { return ApiResult<bool>.Fail(ApiError.Network); }
+        catch (Exception ex) { _log.Error($"POST {endpoint}: {ex.Message}"); return ApiResult<bool>.Fail(ApiError.Unknown); }
     }
 
-    private async Task<bool> PutAsync<T>(string endpoint, T body)
+    private async Task<ApiResult<bool>> PutAsync<T>(string endpoint, T body, CancellationToken ct = default)
     {
         try
         {
             var json = JsonSerializer.Serialize(body, JsonOptions);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PutAsync(endpoint, content);
-            response.EnsureSuccessStatusCode();
-            return true;
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PutAsync(endpoint, content, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _log.Error($"PUT {endpoint} -> {(int)response.StatusCode}");
+                return ApiResult<bool>.Fail(MapStatus(response.StatusCode));
+            }
+            return ApiResult<bool>.Ok(true);
         }
-        catch (HttpRequestException ex)
-        {
-            _log.Error($"PUT {endpoint} failed: {ex.StatusCode} - {ex.Message}");
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"PUT {endpoint} error: {ex.Message}");
-            return false;
-        }
+        catch (TaskCanceledException) { return ApiResult<bool>.Fail(ApiError.Network); }
+        catch (HttpRequestException) { return ApiResult<bool>.Fail(ApiError.Network); }
+        catch (Exception ex) { _log.Error($"PUT {endpoint}: {ex.Message}"); return ApiResult<bool>.Fail(ApiError.Unknown); }
     }
 
     public void Dispose()
     {
         _httpClient.Dispose();
+    }
+
+    // ==================== Test Seam ====================
+
+    /// <summary>
+    /// Test-only entry point: exercises the status → ApiError mapping via a stub HttpMessageHandler.
+    /// Not for production use. Visible to XIVRaidPlannerPlugin.Tests via InternalsVisibleTo.
+    /// </summary>
+    internal static async Task<ApiResult<UserInfo>> SendForTest(HttpMessageHandler handler, string endpoint)
+    {
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://test.local") };
+        var resp = await client.GetAsync(endpoint);
+        if (!resp.IsSuccessStatusCode) return ApiResult<UserInfo>.Fail(MapStatus(resp.StatusCode));
+        return ApiResult<UserInfo>.Ok(new UserInfo());
     }
 }

@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Windowing;
-using Dalamud.Bindings.ImGui;
+using Dalamud.Plugin.Services;
 using Lumina.Excel.Sheets;
 using XIVRaidPlannerPlugin.Api;
 using XIVRaidPlannerPlugin.Services;
@@ -20,42 +21,59 @@ public class BiSViewerWindow : Window, IDisposable
     private static readonly Vector4 ColorGearTome = new(0.176f, 0.831f, 0.749f, 1f);
     private static readonly Vector4 ColorGearBaseTome = new(0.376f, 0.647f, 0.980f, 1f);
     private static readonly Vector4 ColorGearCrafted = new(0.984f, 0.573f, 0.235f, 1f);
-    private static readonly Vector4 ColorComplete = new(0.133f, 0.773f, 0.369f, 1f);
+    private static readonly Vector4 ColorComplete = Theme.Success;
     private static readonly Vector4 ColorNeedsAug = new(0.918f, 0.702f, 0.031f, 1f);
     private static readonly Vector4 ColorMissing = new(0.322f, 0.322f, 0.357f, 1f);
     private static readonly Vector4 ColorTextPrimary = new(0.941f, 0.941f, 0.961f, 1f);
     private static readonly Vector4 ColorTextSecondary = new(0.631f, 0.631f, 0.667f, 1f);
     private static readonly Vector4 ColorTextMuted = new(0.322f, 0.322f, 0.357f, 1f);
-    private static readonly Vector4 ColorAccent = new(0.078f, 0.722f, 0.651f, 1f);
 
-    private static Dictionary<string, Vector4> RoleColors => GameConstants.RoleColors;
 
     private static readonly Dictionary<string, Vector4> EquippedSourceColors = new()
     {
-        ["savage"] = ColorGearRaid, ["raid"] = ColorGearRaid,
-        ["tome_up"] = ColorGearTome, ["tome"] = ColorGearTome, ["base_tome"] = ColorGearBaseTome,
+        ["savage"] = ColorGearRaid,
+        ["raid"] = ColorGearRaid,
+        ["tome_up"] = ColorGearTome,
+        ["tome"] = ColorGearTome,
+        ["base_tome"] = ColorGearBaseTome,
         ["crafted"] = ColorGearCrafted,
         ["catchup"] = new Vector4(0.6f, 0.75f, 0.9f, 1f),
-        ["normal"] = ColorTextSecondary, ["relic"] = new Vector4(0.8f, 0.4f, 0.8f, 1f),
-        ["prep"] = ColorTextMuted, ["unknown"] = ColorTextMuted,
+        ["normal"] = ColorTextSecondary,
+        ["relic"] = new Vector4(0.8f, 0.4f, 0.8f, 1f),
+        ["prep"] = ColorTextMuted,
+        ["unknown"] = ColorTextMuted,
     };
 
     // ==================== Slot Data ====================
 
     private static readonly Dictionary<string, string> SlotNames = new()
     {
-        ["weapon"] = "Weapon", ["head"] = "Head", ["body"] = "Body",
-        ["hands"] = "Hands", ["legs"] = "Legs", ["feet"] = "Feet",
-        ["earring"] = "Ears", ["necklace"] = "Neck", ["bracelet"] = "Wrists",
-        ["ring1"] = "R. Ring", ["ring2"] = "L. Ring",
+        ["weapon"] = "Weapon",
+        ["head"] = "Head",
+        ["body"] = "Body",
+        ["hands"] = "Hands",
+        ["legs"] = "Legs",
+        ["feet"] = "Feet",
+        ["earring"] = "Ears",
+        ["necklace"] = "Neck",
+        ["bracelet"] = "Wrists",
+        ["ring1"] = "R. Ring",
+        ["ring2"] = "L. Ring",
     };
 
     private static readonly Dictionary<string, string> SlotIconFileNames = new()
     {
-        ["weapon"] = "weapon", ["head"] = "head", ["body"] = "body",
-        ["hands"] = "hands", ["legs"] = "legs", ["feet"] = "feet",
-        ["earring"] = "earring", ["necklace"] = "necklace", ["bracelet"] = "bracelet",
-        ["ring1"] = "ring", ["ring2"] = "ring",
+        ["weapon"] = "weapon",
+        ["head"] = "head",
+        ["body"] = "body",
+        ["hands"] = "hands",
+        ["legs"] = "legs",
+        ["feet"] = "feet",
+        ["earring"] = "earring",
+        ["necklace"] = "necklace",
+        ["bracelet"] = "bracelet",
+        ["ring1"] = "ring",
+        ["ring2"] = "ring",
     };
 
     private static Dictionary<string, string> JobIconFileNames => GameConstants.JobIconFileNames;
@@ -63,8 +81,13 @@ public class BiSViewerWindow : Window, IDisposable
     // Full stat name mapping for materia display
     private static readonly Dictionary<string, string> StatFullNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["CRT"] = "Critical Hit", ["DH"] = "Direct Hit Rate", ["DET"] = "Determination",
-        ["SKS"] = "Skill Speed", ["SPS"] = "Spell Speed", ["TEN"] = "Tenacity", ["PIE"] = "Piety",
+        ["CRT"] = "Critical Hit",
+        ["DH"] = "Direct Hit Rate",
+        ["DET"] = "Determination",
+        ["SKS"] = "Skill Speed",
+        ["SPS"] = "Spell Speed",
+        ["TEN"] = "Tenacity",
+        ["PIE"] = "Piety",
     };
 
     // ==================== Fields ====================
@@ -72,6 +95,8 @@ public class BiSViewerWindow : Window, IDisposable
     private readonly BiSDataService _bisData;
     private readonly InventoryService _inventoryService;
     private readonly Configuration _config;
+    private readonly IDataManager _dataManager;
+    private readonly ITextureProvider _textureProvider;
 
     private readonly Dictionary<string, ISharedImmediateTexture?> _slotIcons = new();
     private readonly Dictionary<string, ISharedImmediateTexture?> _jobIcons = new();
@@ -84,12 +109,14 @@ public class BiSViewerWindow : Window, IDisposable
 
     public event System.Action? OnSyncRequested;
 
-    public BiSViewerWindow(BiSDataService bisData, InventoryService inventoryService, Configuration config)
+    public BiSViewerWindow(BiSDataService bisData, InventoryService inventoryService, Configuration config, IDataManager dataManager, ITextureProvider textureProvider)
         : base("XIV Raid Planner \u2014 BiS###XRPBiSViewer", ImGuiWindowFlags.NoCollapse)
     {
         _bisData = bisData;
         _inventoryService = inventoryService;
         _config = config;
+        _dataManager = dataManager;
+        _textureProvider = textureProvider;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = new Vector2(650, 350),
@@ -155,7 +182,8 @@ public class BiSViewerWindow : Window, IDisposable
         {
             for (var i = 0; i < players.Count; i++)
             {
-                ImGui.PushStyleColor(ImGuiCol.Text, RoleColors.GetValueOrDefault(players[i].Role, ColorTextMuted));
+                var rc = Theme.RoleColor(players[i].Role);
+                ImGui.PushStyleColor(ImGuiCol.Text, rc == Theme.White ? ColorTextMuted : rc);
                 if (ImGui.Selectable($"{players[i].Name} ({players[i].Job})##{players[i].Id}", i == idx))
                 { _selectedPlayerIndex = i; _ = _bisData.FetchPlayerGearAsync(players[i].Id); _equippedGearStale = true; }
                 ImGui.PopStyleColor();
@@ -172,13 +200,13 @@ public class BiSViewerWindow : Window, IDisposable
         if (jobIcon != null) { var w = jobIcon.GetWrapOrDefault(); if (w != null) { ImGui.Image(w.Handle, new Vector2(24, 24)); ImGui.SameLine(); } }
 
         var ctrl = ImGui.GetIO().KeyCtrl;
-        ImGui.TextColored(ctrl ? ColorAccent : ColorTextPrimary, $"{gear.PlayerName} ({gear.Job})");
+        ImGui.TextColored(ctrl ? Theme.Accent : ColorTextPrimary, $"{gear.PlayerName} ({gear.Job})");
         if (ImGui.IsItemClicked() && ctrl) OpenPlayerInBrowser(gear.PlayerId);
 
         if (gear.BisLink != null)
         {
             ImGui.SameLine(); ImGui.TextColored(ColorTextMuted, " | "); ImGui.SameLine();
-            ImGui.TextColored(ctrl ? ColorAccent : ColorGearTome, "BiS");
+            ImGui.TextColored(ctrl ? Theme.Accent : ColorGearTome, "BiS");
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Ctrl+Click to open BiS link");
             if (ImGui.IsItemClicked() && ctrl) OpenBisLinkInBrowser(gear.BisLink);
         }
@@ -306,8 +334,10 @@ public class BiSViewerWindow : Window, IDisposable
         if (string.IsNullOrEmpty(bisSource)) { ImGui.TextColored(ColorTextMuted, "-"); return; }
         var (letter, color) = bisSource switch
         {
-            "raid" => ("R", ColorGearRaid), "tome" => ("T", ColorGearTome),
-            "base_tome" => ("BT", ColorGearBaseTome), "crafted" => ("C", ColorGearCrafted),
+            "raid" => ("R", ColorGearRaid),
+            "tome" => ("T", ColorGearTome),
+            "base_tome" => ("BT", ColorGearBaseTome),
+            "crafted" => ("C", ColorGearCrafted),
             _ => ("-", ColorTextMuted),
         };
         var dl = ImGui.GetWindowDrawList();
@@ -493,7 +523,7 @@ public class BiSViewerWindow : Window, IDisposable
         try
         {
             // Search Lumina's Materia sheet for a row+grade that produces this item ID
-            var materiaSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Materia>();
+            var materiaSheet = _dataManager.GetExcelSheet<Lumina.Excel.Sheets.Materia>();
             if (materiaSheet == null) { _materiaStatsCache[itemId] = fallback; return fallback; }
 
             foreach (var row in materiaSheet)
@@ -571,7 +601,7 @@ public class BiSViewerWindow : Window, IDisposable
         if (_itemIconIds.TryGetValue(itemId, out var c)) return c;
         try
         {
-            var s = Plugin.DataManager.GetExcelSheet<Item>();
+            var s = _dataManager.GetExcelSheet<Item>();
             if (s == null) { _itemIconIds[itemId] = 0; return 0; }
             var i = s.GetRowOrDefault(itemId);
             if (i == null) { _itemIconIds[itemId] = 0; return 0; }
@@ -585,7 +615,7 @@ public class BiSViewerWindow : Window, IDisposable
     private ISharedImmediateTexture? GetItemIcon(uint iconId)
     {
         if (_itemIcons.TryGetValue(iconId, out var c)) return c;
-        try { var t = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)); _itemIcons[iconId] = t; return t; }
+        try { var t = _textureProvider.GetFromGameIcon(new GameIconLookup(iconId)); _itemIcons[iconId] = t; return t; }
         catch { _itemIcons[iconId] = null; return null; }
     }
 
@@ -596,7 +626,7 @@ public class BiSViewerWindow : Window, IDisposable
         try
         {
             var asm = Assembly.GetExecutingAssembly();
-            var t = Plugin.TextureProvider.GetFromManifestResource(asm, $"XIVRaidPlannerPlugin.Images.slots.{key}.png");
+            var t = _textureProvider.GetFromManifestResource(asm, $"XIVRaidPlannerPlugin.Images.slots.{key}.png");
             _slotIcons[key] = t;
             return t;
         }
@@ -609,7 +639,7 @@ public class BiSViewerWindow : Window, IDisposable
         if (!JobIconFileNames.TryGetValue(job, out var fn)) { _jobIcons[job] = null; return null; }
         try
         {
-            var t = Plugin.TextureProvider.GetFromManifestResource(Assembly.GetExecutingAssembly(), $"XIVRaidPlannerPlugin.Images.jobs.{fn}.png");
+            var t = _textureProvider.GetFromManifestResource(Assembly.GetExecutingAssembly(), $"XIVRaidPlannerPlugin.Images.jobs.{fn}.png");
             _jobIcons[job] = t;
             return t;
         }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
 
@@ -38,11 +37,6 @@ public class PartyMatchingService
     /// </summary>
     public void MatchParty(List<PlayerInfo> plannerPlayers)
     {
-        CurrentMatches.Clear();
-        UnmatchedPlayers = new List<PlayerInfo>(plannerPlayers);
-        UnmatchedPartyMembers = new List<string>();
-
-        // Get party member names
         var partyNames = new List<string>();
         foreach (var member in _partyList)
         {
@@ -51,34 +45,10 @@ public class PartyMatchingService
                 partyNames.Add(name);
         }
 
-        foreach (var partyName in partyNames)
-        {
-            // 1. Check manual overrides first
-            if (_config.PlayerNameOverrides.TryGetValue(partyName, out var overrideId))
-            {
-                var overridePlayer = UnmatchedPlayers.FirstOrDefault(p => p.Id == overrideId);
-                if (overridePlayer != null)
-                {
-                    CurrentMatches[partyName] = overrideId;
-                    UnmatchedPlayers.Remove(overridePlayer);
-                    continue;
-                }
-            }
-
-            // 2. Exact name match (case-insensitive)
-            var exactMatch = UnmatchedPlayers.FirstOrDefault(
-                p => string.Equals(p.Name.Trim(), partyName, StringComparison.OrdinalIgnoreCase));
-
-            if (exactMatch != null)
-            {
-                CurrentMatches[partyName] = exactMatch.Id;
-                UnmatchedPlayers.Remove(exactMatch);
-                continue;
-            }
-
-            // 3. No match found
-            UnmatchedPartyMembers.Add(partyName);
-        }
+        var matchResult = PartyMatcher.Match(partyNames, plannerPlayers, _config.PlayerNameOverrides);
+        CurrentMatches = matchResult.Matches;
+        UnmatchedPlayers = matchResult.UnmatchedPlayers;
+        UnmatchedPartyMembers = matchResult.UnmatchedPartyMembers;
 
         _log.Information(
             $"Party matching: {CurrentMatches.Count} matched, " +
@@ -102,11 +72,28 @@ public class PartyMatchingService
         return null;
     }
 
-    /// <summary>Add a manual override and re-match.</summary>
+    /// <summary>
+    /// Fires when a manual override is added, changed, or removed.
+    /// Args: (characterName, newPlayerId-or-null-on-remove).
+    /// Subscribers (e.g., BiSDataService re-fetch) must filter on whether the change affects them.
+    /// </summary>
+    public event Action<string, string?>? OnOverrideChanged;
+
+    /// <summary>Add or change a manual override and re-match.</summary>
     public void SetOverride(string characterName, string playerId, List<PlayerInfo> plannerPlayers)
     {
         _config.PlayerNameOverrides[characterName] = playerId;
         _config.Save();
         MatchParty(plannerPlayers);
+        OnOverrideChanged?.Invoke(characterName, playerId);
+    }
+
+    /// <summary>Remove a manual override and re-match.</summary>
+    public void RemoveOverride(string characterName, List<PlayerInfo> plannerPlayers)
+    {
+        if (!_config.PlayerNameOverrides.Remove(characterName)) return;
+        _config.Save();
+        MatchParty(plannerPlayers);
+        OnOverrideChanged?.Invoke(characterName, null);
     }
 }

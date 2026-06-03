@@ -1,0 +1,10 @@
+# Force consistent line endings across platforms; matches .editorconfig (end_of_line = crlf for C#).
+* text=auto eol=crlf
+
+# Binary files (do not touch line endings)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.dll binary

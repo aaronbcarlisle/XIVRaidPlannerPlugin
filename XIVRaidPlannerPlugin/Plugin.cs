@@ -1,15 +1,10 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Dalamud.Game.Addon.Lifecycle;
-using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Command;
+using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
-using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
 using XIVRaidPlannerPlugin.Api;
+using XIVRaidPlannerPlugin.Auth;
 using XIVRaidPlannerPlugin.Services;
 using XIVRaidPlannerPlugin.Windows;
 
@@ -42,6 +37,8 @@ public sealed class Plugin : IDalamudPlugin
 
     // Services
     private readonly RaidPlannerClient _apiClient;
+    private readonly PluginThread _thread;
+    private readonly BrowserAuthService _browserAuth;
     private readonly TerritoryService _territoryService;
     private readonly PartyMatchingService _partyMatching;
     private readonly LootDetectionService _lootDetection;
@@ -50,6 +47,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly BiSDataService _bisData;
     private readonly InventoryService _inventoryService;
     private readonly AddonHighlightService _addonHighlight;
+    private readonly LootLogCoordinator _lootLog;
+    private readonly RaidSessionService _raidSession;
+    private readonly GearSyncService _gearSync;
 
     // Windows
     public readonly WindowSystem WindowSystem = new("XIVRaidPlannerPlugin");
@@ -59,16 +59,14 @@ public sealed class Plugin : IDalamudPlugin
     private readonly LeaveWarningWindow _leaveWarningWindow;
     private readonly BiSViewerWindow _bisViewerWindow;
 
-    // Cached priority data
-    private PriorityResponse? _cachedPriority;
-    private bool _autoDetectedTier;
-
     public Plugin()
     {
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
         // Initialize services
         _apiClient = new RaidPlannerClient(Configuration, Log);
+        _thread = new PluginThread(Framework, Log);
+        _browserAuth = new BrowserAuthService(Configuration, _apiClient, Log);
         _territoryService = new TerritoryService(ClientState, DataManager, Log);
         _partyMatching = new PartyMatchingService(PartyList, Configuration, Log);
         _lootDetection = new LootDetectionService(ChatGui, DataManager, Log);
@@ -80,11 +78,11 @@ public sealed class Plugin : IDalamudPlugin
         _addonHighlight.Register();
 
         // Initialize windows
-        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState);
-        _overlayWindow = new PriorityOverlayWindow(Configuration);
+        _configWindow = new ConfigWindow(Configuration, _apiClient, _partyMatching, PartyList, PlayerState, _thread, _browserAuth, _bisData);
+        _overlayWindow = new PriorityOverlayWindow(Configuration, TextureProvider);
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
-        _bisViewerWindow = new BiSViewerWindow(_bisData, _inventoryService, Configuration);
+        _bisViewerWindow = new BiSViewerWindow(_bisData, _inventoryService, Configuration, DataManager, TextureProvider);
 
         WindowSystem.AddWindow(_configWindow);
         WindowSystem.AddWindow(_overlayWindow);
@@ -92,37 +90,61 @@ public sealed class Plugin : IDalamudPlugin
         WindowSystem.AddWindow(_leaveWarningWindow);
         WindowSystem.AddWindow(_bisViewerWindow);
 
+        // Construct raid session service (owns priority cache + savage events + DutyComplete/NeedGreed)
+        _raidSession = new RaidSessionService(
+            _apiClient, _territoryService, _partyMatching, _bisData, _lootDetection, _thread,
+            ChatGui, PlayerState, Configuration, Log,
+            _overlayWindow, _bisViewerWindow, _configWindow, _leaveWarningWindow, AddonLifecycle);
+
+        // Construct loot coordinator (depends on raid session for priority + refresh)
+        _lootLog = new LootLogCoordinator(
+            _apiClient,
+            _thread,
+            ChatGui,
+            _itemMapping,
+            _bisData,
+            PlayerState,
+            _partyMatching,
+            Log,
+            Configuration,
+            () => _territoryService.CurrentFloorName,
+            () => _raidSession.CachedPriority,
+            () => _raidSession.RefreshPriority(),
+            _overlayWindow,
+            _lootConfirmWindow);
+
+        // Construct gear sync service (depends on loot coordinator for new-acquisition logging)
+        _gearSync = new GearSyncService(
+            _apiClient, _inventoryService, _bisData, _thread, ChatGui, PlayerState, Configuration,
+            _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log);
+
+        // Initialize leave-warning addon listener now that windows + session state are available
+        _leaveWarning.Initialize(
+            AddonLifecycle, PlayerState, _partyMatching, _lootDetection,
+            _overlayWindow, _leaveWarningWindow, () => _raidSession.GetState());
+
         // Wire up events
-        _territoryService.OnSavageEntered += OnSavageEntered;
-        _territoryService.OnSavageExited += OnSavageExited;
-        _lootDetection.OnLootObtained += OnLootObtained;
-        _lootDetection.OnItemPurchased += OnItemPurchased;
-        _overlayWindow.OnManualLog += OnManualLog;
-        _overlayWindow.OnMarkFloorCleared += OnMarkFloorCleared;
+        _lootDetection.OnLootObtained += _lootLog.OnLootObtained;
+        _lootDetection.OnItemPurchased += _lootLog.OnItemPurchased;
+        _overlayWindow.OnManualLog += _lootLog.OnManualLog;
+        _overlayWindow.OnMarkFloorCleared += _lootLog.OnMarkFloorCleared;
         _overlayWindow.OnRefresh += OnRefreshRequested;
-        _lootConfirmWindow.OnConfirm += OnLootConfirmed;
-        _bisViewerWindow.OnSyncRequested += SyncGear;
+        _lootConfirmWindow.OnConfirm += _lootLog.OnLootConfirmed;
+        _bisViewerWindow.OnSyncRequested += _gearSync.Sync;
+        // When the local character's player-link changes, drop the cached BiS gear and re-fetch
+        // so the BiS window doesn't keep showing the previous player's data.
+        _partyMatching.OnOverrideChanged += OnLocalPlayerLinkChanged;
 
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle priority overlay. '/xrp bis' for BiS viewer. '/xrp sync' to sync gear. '/xrp config' for settings.",
+            HelpMessage = "Toggle BiS viewer. '/xrp priority' for priority overlay. '/xrp sync' to sync gear. '/xrp config' for settings.",
         });
 
         // Register UI drawing
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleOverlay;
-
-        // Hook into the "Abandon duty?" confirmation dialog for leave warnings
-        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
-        AddonLifecycle.RegisterListener(AddonEvent.PreFinalize, "SelectYesno", OnSelectYesnoClose);
-
-        // Hook for overlay timing: show on duty complete
-        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "DutyComplete", OnDutyCompleteSetup);
-
-        // Hook for overlay timing: show on loot window open
-        AddonLifecycle.RegisterListener(AddonEvent.PostSetup, "NeedGreed", OnNeedGreedSetup);
 
         // Check if already in a savage instance (e.g., plugin loaded mid-instance)
         _territoryService.CheckCurrentTerritory();
@@ -137,20 +159,25 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleOverlay;
 
-        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "SelectYesno", OnSelectYesnoSetup);
-        AddonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "SelectYesno", OnSelectYesnoClose);
-        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "DutyComplete", OnDutyCompleteSetup);
-        AddonLifecycle.UnregisterListener(AddonEvent.PostSetup, "NeedGreed", OnNeedGreedSetup);
-
-        _territoryService.OnSavageEntered -= OnSavageEntered;
-        _territoryService.OnSavageExited -= OnSavageExited;
-        _lootDetection.OnLootObtained -= OnLootObtained;
-        _lootDetection.OnItemPurchased -= OnItemPurchased;
-        _overlayWindow.OnManualLog -= OnManualLog;
-        _overlayWindow.OnMarkFloorCleared -= OnMarkFloorCleared;
+        _lootDetection.OnLootObtained -= _lootLog.OnLootObtained;
+        _lootDetection.OnItemPurchased -= _lootLog.OnItemPurchased;
+        _overlayWindow.OnManualLog -= _lootLog.OnManualLog;
+        _overlayWindow.OnMarkFloorCleared -= _lootLog.OnMarkFloorCleared;
         _overlayWindow.OnRefresh -= OnRefreshRequested;
-        _lootConfirmWindow.OnConfirm -= OnLootConfirmed;
-        _bisViewerWindow.OnSyncRequested -= SyncGear;
+        _lootConfirmWindow.OnConfirm -= _lootLog.OnLootConfirmed;
+        _bisViewerWindow.OnSyncRequested -= _gearSync.Sync;
+        _partyMatching.OnOverrideChanged -= OnLocalPlayerLinkChanged;
+
+        // Dispose services that own addon listeners FIRST
+        // This prevents SelectYesno/other addon events from firing handlers that touch windows
+        _raidSession.Dispose();
+        _leaveWarning.Dispose();
+
+        // Dispose remaining services
+        _addonHighlight.Dispose();
+        _territoryService.Dispose();
+        _lootDetection.Dispose();
+        _apiClient.Dispose();
 
         // Dispose windows
         WindowSystem.RemoveAllWindows();
@@ -159,12 +186,6 @@ public sealed class Plugin : IDalamudPlugin
         _lootConfirmWindow.Dispose();
         _leaveWarningWindow.Dispose();
         _bisViewerWindow.Dispose();
-
-        // Dispose services
-        _addonHighlight.Dispose();
-        _territoryService.Dispose();
-        _lootDetection.Dispose();
-        _apiClient.Dispose();
 
         // Remove commands
         CommandManager.RemoveHandler(CommandName);
@@ -182,14 +203,20 @@ public sealed class Plugin : IDalamudPlugin
             case "settings":
                 ToggleConfigUi();
                 break;
+            case "priority":
+            case "overlay":
+                ToggleOverlay();
+                break;
             case "bis":
                 ToggleBisViewer();
                 break;
             case "sync":
-                SyncGear();
+                _gearSync.Sync();
                 break;
             default:
-                ToggleOverlay();
+                // Bare /xrp opens BiS — useful in town between pulls.
+                // Priority overlay still auto-opens via ShowOverlayOnEntry/OnDutyComplete/OnLootWindow.
+                ToggleBisViewer();
                 break;
         }
     }
@@ -204,714 +231,49 @@ public sealed class Plugin : IDalamudPlugin
             var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
             if (!string.IsNullOrEmpty(charName) && _bisData.CurrentPlayerGear == null)
             {
-                Task.Run(async () => await _bisData.FetchCurrentPlayerGearAsync(charName));
+                _thread.RunBackground(async () => await _bisData.FetchCurrentPlayerGearAsync(charName));
             }
         }
         _bisViewerWindow.Toggle();
     }
-    public void SyncGear()
+
+    private void OnLocalPlayerLinkChanged(string characterName, string? newPlayerId)
     {
-        if (string.IsNullOrEmpty(Configuration.ApiKey))
+        var localName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
+        if (string.IsNullOrEmpty(localName) || localName != characterName) return;
+
+        var oldPlayerId = _bisData.CurrentPlayerGear?.PlayerId;
+        if (oldPlayerId != null)
+            _bisData.InvalidatePlayer(oldPlayerId);
+
+        // If the override was cleared (None), don't auto-fetch — let the user open BiS to retry.
+        if (newPlayerId == null) return;
+
+        _thread.RunBackground(async () =>
         {
-            ChatGui.PrintError("[XRP] No API key configured. Use /xrp config.");
-            return;
-        }
-
-        var currentGear = _bisData.CurrentPlayerGear;
-        if (currentGear == null)
-        {
-            ChatGui.PrintError("[XRP] No BiS data loaded. Enter a savage instance or use /xrp bis first.");
-            return;
-        }
-
-        ChatGui.Print("[XRP] Syncing equipped gear...");
-
-        // Read equipped items — safe: called from command handler or Draw() button, both on framework thread
-        var equipped = _inventoryService.ReadEquippedGear();
-        if (equipped.Count == 0)
-        {
-            ChatGui.PrintError("[XRP] Could not read equipped gear.");
-            return;
-        }
-
-        // Re-fetch fresh gear data from API before comparing (web app might have changed)
-        var playerId = currentGear.PlayerId;
-        _bisData.InvalidatePlayer(playerId);
-        Task.Run(async () =>
-        {
-            // Fetch latest gear state from API (in case user reset progress on web app)
-            await _bisData.FetchPlayerGearAsync(playerId, isCurrentPlayer: true);
-            var freshGear = _bisData.CurrentPlayerGear;
-            if (freshGear == null)
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError("[XRP] Failed to fetch current gear state from API."));
-                return;
-            }
-
-            // Build the gear update comparing equipped items against FRESH API data
-            var updatedGear = _inventoryService.BuildGearUpdate(equipped, freshGear.Gear);
-
-            // Check tome weapon status
-            TomeWeaponInfo? tomeWeaponUpdate = null;
-            if (freshGear.TomeWeapon.Pursuing && equipped.TryGetValue("weapon", out var equippedWeapon))
-            {
-                var weaponSource = _inventoryService.ClassifySource(equippedWeapon.ItemId);
-                if (weaponSource is "tome" or "tome_up")
-                {
-                    tomeWeaponUpdate = new TomeWeaponInfo
-                    {
-                        Pursuing = true,
-                        HasItem = true,
-                        IsAugmented = weaponSource == "tome_up",
-                    };
-                    Log.Info($"[Sync] Detected tome weapon: source={weaponSource}, augmented={tomeWeaponUpdate.IsAugmented}");
-                }
-            }
-
-            // Count changes and track newly acquired BiS slots
-            var changes = 0;
-            var newlyAcquired = new List<string>();
-            for (var i = 0; i < updatedGear.Count && i < freshGear.Gear.Count; i++)
-            {
-                if (updatedGear[i].CurrentSource != freshGear.Gear[i].CurrentSource ||
-                    updatedGear[i].HasItem != freshGear.Gear[i].HasItem ||
-                    updatedGear[i].IsAugmented != freshGear.Gear[i].IsAugmented)
-                    changes++;
-
-                if (updatedGear[i].HasItem && !freshGear.Gear[i].HasItem)
-                    newlyAcquired.Add(updatedGear[i].Slot);
-            }
-
-            // Also count tome weapon as a change
-            if (tomeWeaponUpdate != null && !freshGear.TomeWeapon.HasItem)
-                changes++;
-
-            Log.Info($"[Sync] Comparison: {changes} gear changes, {newlyAcquired.Count} newly acquired, tomeWeapon={tomeWeaponUpdate != null}");
-
-            if (changes == 0)
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.Print("[XRP] Gear already up to date."));
-                return;
-            }
-
-            // Send update to API
-            var success = await _apiClient.SyncPlayerGearAsync(
-                freshGear.PlayerId,
-                new SnapshotPlayerUpdateRequest { Gear = updatedGear, TomeWeapon = tomeWeaponUpdate });
-
-            if (success)
-            {
-                // Invalidate cache before re-fetch (safe from background thread — ConcurrentDictionary)
-                _bisData.InvalidatePlayer(freshGear.PlayerId);
-
-                // Marshal UI updates to framework thread
-                Framework.RunOnFrameworkThread(() =>
-                {
-                    ChatGui.Print($"[XRP] Gear synced: {changes} slot(s) updated.");
-                    _bisViewerWindow.InvalidateEquippedGear();
-                });
-
-                // Auto-log loot entries only when in a savage instance with reliable floor data
-                if (newlyAcquired.Count > 0 && _cachedPriority != null && _territoryService.CurrentFloor != null)
-                {
-                    try { await LogNewAcquisitionsAsync(freshGear.PlayerId, newlyAcquired); }
-                    catch (System.Exception ex) { Log.Warning($"Loot logging failed (non-critical): {ex.Message}"); }
-                }
-                else if (newlyAcquired.Count > 0)
-                {
-                    Framework.RunOnFrameworkThread(() =>
-                        ChatGui.Print($"[XRP] {newlyAcquired.Count} new BiS item(s) detected. Enter a savage instance to auto-log."));
-                }
-
-                // Re-fetch to update the BiS viewer (cache was invalidated above)
-                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
-                if (!string.IsNullOrEmpty(charName))
-                    await _bisData.FetchCurrentPlayerGearAsync(charName);
-            }
-            else
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError("[XRP] Failed to sync gear. Check connection."));
-            }
-        });
-    }
-
-    // ==================== Territory Events ====================
-
-    private void OnSavageEntered(int floor)
-    {
-        if (string.IsNullOrEmpty(Configuration.ApiKey))
-            return;
-
-        _lootDetection.Reset();
-
-        // Fetch priority data (always fetch, even if overlay is hidden, so data is ready)
-        Task.Run(async () =>
-        {
-            // Auto-detect active tier only if none is configured
-            // Set transiently on config (no Save) so display shows tier name; cleared on instance exit
-            if (!string.IsNullOrEmpty(Configuration.DefaultGroupId) && string.IsNullOrEmpty(Configuration.DefaultTierId))
-            {
-                var activeTier = await _apiClient.ResolveActiveTierAsync(Configuration.DefaultGroupId);
-                if (activeTier != null)
-                {
-                    Log.Information($"Auto-detected active tier: {activeTier.TierId} ({activeTier.Id})");
-                    Configuration.DefaultTierId = activeTier.Id;
-                    Configuration.DefaultTierName = activeTier.TierId;
-                    _autoDetectedTier = true;
-                }
-                else
-                {
-                    Log.Warning("No active tier found and no tier configured. Overlay will not show.");
-                    Framework.RunOnFrameworkThread(() =>
-                        ChatGui.PrintError("[XRP] No active tier found. Select a tier in /xrp config."));
-                    return;
-                }
-            }
-
-            if (string.IsNullOrEmpty(Configuration.DefaultTierId))
-                return;
-
-            _cachedPriority = await _apiClient.GetPriorityAsync(floor);
-            if (_cachedPriority != null)
-            {
-                var floorName = floor <= _cachedPriority.TierFloors.Count
-                    ? _cachedPriority.TierFloors[floor - 1]
-                    : $"Floor {floor}";
-
-                _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName, Configuration.DefaultTierName);
-
-                // Only show overlay if configured to show on entry
-                if (Configuration.ShowOverlay && Configuration.ShowOverlayOnEntry)
-                    _overlayWindow.IsOpen = true;
-
-                // Share player list with config window and run matching
-                _configWindow.SetStaticPlayers(_cachedPriority.Players);
-                _partyMatching.MatchParty(_cachedPriority.Players);
-
-                // Fetch BiS data for the current player
-                _bisData.AvailablePlayers = _cachedPriority.Players;
-
-                // Set user role from the static group info
-                try
-                {
-                    var groups = await _apiClient.GetStaticGroupsAsync();
-                    var group = groups.Find(g => g.Id == Configuration.DefaultGroupId);
-                    if (group?.UserRole != null)
-                        _bisData.UserRole = group.UserRole;
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning($"Failed to fetch user role: {ex.Message}");
-                }
-
-                var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
-                if (!string.IsNullOrEmpty(charName))
-                {
-                    await _bisData.FetchCurrentPlayerGearAsync(charName);
-
-                    // Show BiS viewer if configured
-                    if (Configuration.ShowBisViewer)
-                        _bisViewerWindow.IsOpen = true;
-                }
-            }
-        });
-    }
-
-    private void OnSavageExited()
-    {
-        _overlayWindow.ClearData();
-        _overlayWindow.IsOpen = false;
-        _leaveWarningWindow.IsOpen = false;
-        _bisViewerWindow.IsOpen = false;
-        _bisData.ClearCache();
-        _apiClient.InvalidateResolvedTier();
-
-        // Clear auto-detected tier so it re-detects on next entry
-        if (_autoDetectedTier)
-        {
-            Configuration.DefaultTierId = string.Empty;
-            Configuration.DefaultTierName = string.Empty;
-            _autoDetectedTier = false;
-        }
-    }
-
-    // ==================== Leave Warning ====================
-
-    private void OnSelectYesnoSetup(AddonEvent type, AddonArgs args)
-    {
-        Log.Information($"SelectYesno triggered — floor={_territoryService.CurrentFloor}, " +
-                        $"hasPriority={_cachedPriority != null}, leaveWarning={Configuration.EnableLeaveWarning}");
-
-        // Only check when we're in a savage instance with priority data
-        if (_territoryService.CurrentFloor == null || _cachedPriority == null || !Configuration.EnableLeaveWarning)
-            return;
-
-        // Find the current player's planner ID from their character name
-        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
-        Log.Information($"Player: loaded={PlayerState.IsLoaded}, name={charName ?? "null"}");
-        if (string.IsNullOrEmpty(charName))
-            return;
-
-        var currentPlayerId = _partyMatching.GetPlayerIdForName(charName);
-        Log.Information($"Matched player ID: {currentPlayerId ?? "null"}");
-
-        // Get the floor priority data
-        var floorKey = $"floor{_territoryService.CurrentFloor.Value}";
-        if (!_cachedPriority.Priority.TryGetValue(floorKey, out var floorPriority))
-            return;
-
-        Log.Information($"Leave check: player={currentPlayerId ?? "null"}, " +
-                        $"detected={_lootDetection.DistributedLoot.Count}, " +
-                        $"manuallyLogged={_overlayWindow.LoggedEntries.Count}, " +
-                        $"drops={floorPriority.Count}");
-
-        _leaveWarning.CheckLeaveWarning(currentPlayerId, _lootDetection.DistributedLoot,
-            floorPriority, _overlayWindow.LoggedEntries);
-
-        if (_leaveWarning.ShouldShowWarning)
-        {
-            _leaveWarningWindow.IsOpen = true;
-            Log.Information($"Leave warning shown — {_leaveWarning.WarningItems.Count} unclaimed priority items");
-        }
-        else
-        {
-            Log.Information("Leave check passed — no unclaimed priority loot");
-        }
-    }
-
-    private void OnSelectYesnoClose(AddonEvent type, AddonArgs args)
-    {
-        // Dialog closed (Yes, No, or Escape) — dismiss our overlay
-        _leaveWarning.Dismiss();
-        _leaveWarningWindow.IsOpen = false;
-    }
-
-    // ==================== Overlay Timing Events ====================
-
-    private void OnDutyCompleteSetup(AddonEvent type, AddonArgs args)
-    {
-        if (!Configuration.ShowOverlay || !Configuration.ShowOverlayOnDutyComplete)
-            return;
-
-        if (_cachedPriority != null && _territoryService.CurrentFloor != null)
-        {
-            Log.Information("Duty complete — showing overlay");
-            _overlayWindow.IsOpen = true;
-        }
-    }
-
-    private void OnNeedGreedSetup(AddonEvent type, AddonArgs args)
-    {
-        if (!Configuration.ShowOverlay || !Configuration.ShowOverlayOnLootWindow)
-            return;
-
-        if (_cachedPriority != null && _territoryService.CurrentFloor != null)
-        {
-            Log.Information("Loot window opened — showing overlay");
-            _overlayWindow.IsOpen = true;
-        }
-    }
-
-    // ==================== Loot Detection ====================
-
-    private void OnLootObtained(LootEvent loot)
-    {
-        if (string.IsNullOrEmpty(Configuration.ApiKey))
-            return;
-
-        var playerId = _partyMatching.GetPlayerIdForName(loot.PlayerName);
-        if (playerId == null)
-        {
-            Log.Warning($"Could not match loot recipient '{loot.PlayerName}' to a planner player");
-            return;
-        }
-
-        var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-
-        // Look up player-specific augmentable slots for materials
-        string[]? eligibleSlots = null;
-        if (loot.IsMaterial && loot.MaterialType != null && _cachedPriority != null)
-        {
-            var playerInfo = _cachedPriority.Players.Find(p => p.Id == playerId);
-            if (playerInfo?.AugmentableSlots != null &&
-                playerInfo.AugmentableSlots.TryGetValue(loot.MaterialType, out var slots))
-            {
-                eligibleSlots = slots.ToArray();
-            }
-        }
-
-        switch (Configuration.AutoLogMode)
-        {
-            case AutoLogMode.Confirm:
-                Task.Run(async () =>
-                {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
-                    Framework.RunOnFrameworkThread(() =>
-                        _lootConfirmWindow.ShowForLoot(loot, playerId, loot.PlayerName, floorName, week, eligibleSlots));
-                });
-                break;
-
-            case AutoLogMode.Auto:
-                Task.Run(async () =>
-                {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
-                    // Auto-select slot if only one option; otherwise log without augmentation
-                    var autoSlot = eligibleSlots is { Length: 1 } ? eligibleSlots[0] : null;
-                    await LogLootAsync(playerId, loot.GearSlot, loot.MaterialType, floorName, week, autoSlot);
-                    Log.Information($"Auto-logged: {loot.ItemName} -> {loot.PlayerName}");
-                });
-                break;
-
-            case AutoLogMode.Manual:
-                // Do nothing - user must use overlay buttons
-                break;
-        }
-    }
-
-    // ==================== Purchase Detection (Phase 5A) ====================
-
-    private void OnItemPurchased(PurchaseEvent purchase)
-    {
-        if (string.IsNullOrEmpty(Configuration.ApiKey))
-            return;
-
-        // Only auto-log if the purchased item is BiS
-        if (!_itemMapping.HasData || !_itemMapping.IsBisItem(purchase.ItemId))
-        {
-            Log.Debug($"Purchased item {purchase.ItemName} is not BiS — skipping auto-log");
-            return;
-        }
-
-        // Find current player's planner ID
-        var charName = PlayerState.IsLoaded ? PlayerState.CharacterName?.ToString() : null;
-        if (string.IsNullOrEmpty(charName))
-            return;
-
-        var playerId = _partyMatching.GetPlayerIdForName(charName);
-        if (playerId == null)
-        {
-            // Try using the BiS data player ID if party matching hasn't run
-            playerId = _bisData.CurrentPlayerGear?.PlayerId;
-        }
-
-        if (playerId == null)
-        {
-            Log.Warning($"Could not match character to planner player for purchase logging");
-            return;
-        }
-
-        var capturedPlayerId = playerId;
-        var floorName = _territoryService.CurrentFloorName ?? "M9S"; // Default to M9S for vendor purchases
-
-        switch (Configuration.AutoLogMode)
-        {
-            case AutoLogMode.Confirm:
-                Task.Run(async () =>
-                {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
-
-                    // Show confirmation for the purchase
-                    var lootEvent = new LootEvent
-                    {
-                        PlayerName = charName,
-                        ItemName = purchase.ItemName,
-                        ItemId = purchase.ItemId,
-                        GearSlot = purchase.GearSlot,
-                        MaterialType = purchase.MaterialType,
-                        Timestamp = DateTime.UtcNow,
-                    };
-                    Framework.RunOnFrameworkThread(() =>
-                        _lootConfirmWindow.ShowForLoot(lootEvent, capturedPlayerId, charName, floorName, week, null));
-                });
-                break;
-
-            case AutoLogMode.Auto:
-                Task.Run(async () =>
-                {
-                    var weekData = await _apiClient.GetCurrentWeekAsync();
-                    var week = weekData?.CurrentWeek ?? 1;
-                    await LogPurchaseAsync(capturedPlayerId, purchase, floorName, week);
-                });
-                break;
-
-            case AutoLogMode.Manual:
-                // Don't auto-log
-                ChatGui.Print($"[XRP] BiS purchase detected: {purchase.ItemName}. Use /xrp sync to update.");
-                break;
-        }
-    }
-
-    private async Task<bool> LogPurchaseAsync(string playerId, PurchaseEvent purchase, string floorName, int weekNumber)
-    {
-        if (purchase.IsGear && purchase.GearSlot != null)
-        {
-            var success = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                ItemSlot = purchase.GearSlot,
-                RecipientPlayerId = playerId,
-                Method = "purchase",
-                Notes = "Auto-logged via Dalamud plugin",
-                MarkAcquired = true,
-            });
-
-            if (success)
-            {
-                Framework.RunOnFrameworkThread(() =>
-                {
-                    ChatGui.Print($"[XRP] Purchase logged: {purchase.ItemName}");
-                    _bisData.InvalidatePlayer(playerId);
-                });
-            }
-            else
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log purchase: {purchase.ItemName}"));
-            }
-            return success;
-        }
-
-        if (purchase.IsMaterial && purchase.MaterialType != null)
-        {
-            var success = await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                MaterialType = purchase.MaterialType,
-                RecipientPlayerId = playerId,
-                Method = "purchase",
-                Notes = "Auto-logged via Dalamud plugin",
-            });
-
-            if (success)
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.Print($"[XRP] Material purchase logged: {purchase.ItemName}"));
-            }
-            else
-            {
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Failed to log material purchase: {purchase.ItemName}"));
-            }
-            return success;
-        }
-
-        return false;
-    }
-
-    // ==================== Loot Logging ====================
-
-    private void OnManualLog(string playerId, string slot, string playerName, string? slotAugmented)
-    {
-        var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-        Log.Information($"Manual log requested: {slot} -> {playerName} (floor={floorName}, player={playerId}, slotAugmented={slotAugmented ?? "none"})");
-        ChatGui.Print($"[XRP] Logging {slot} -> {playerName}...");
-
-        Task.Run(async () =>
-        {
-            try
-            {
-                var weekData = await _apiClient.GetCurrentWeekAsync();
-                var week = weekData?.CurrentWeek ?? 1;
-
-                // Determine if this is a gear slot or material
-                string? gearSlot = null;
-                string? materialType = null;
-
-                if (slot is "twine" or "glaze" or "solvent" or "universal_tomestone")
-                    materialType = slot;
-                else
-                    gearSlot = slot;
-
-                var success = await LogLootAsync(playerId, gearSlot, materialType, floorName, week, slotAugmented);
-                if (success)
-                {
-                    Log.Information($"Manual log success: {slot} -> {playerName}");
-                    Framework.RunOnFrameworkThread(() =>
-                    {
-                        ChatGui.Print($"[XRP] Logged {slot} -> {playerName}");
-                        _overlayWindow.MarkAsLogged(playerId, slot, playerName);
-                    });
-                    await RefreshPriority();
-                }
-                else
-                {
-                    Log.Error($"Manual log failed: {slot} -> {playerName}");
-                    Framework.RunOnFrameworkThread(() =>
-                    {
-                        ChatGui.PrintError($"[XRP] Failed to log {slot} -> {playerName}");
-                        _overlayWindow.MarkLogFailed(slot, playerName);
-                    });
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Log.Error($"Manual log exception: {ex}");
-                Framework.RunOnFrameworkThread(() => ChatGui.PrintError($"[XRP] Error: {ex.Message}"));
-            }
-        });
-    }
-
-    private void OnLootConfirmed(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber, string? slotAugmented)
-    {
-        Task.Run(async () =>
-        {
-            await LogLootAsync(playerId, gearSlot, materialType, floorName, weekNumber, slotAugmented);
-
-            // Refresh priority after logging
-            await RefreshPriority();
-        });
-    }
-
-    private async Task<bool> LogLootAsync(string playerId, string? gearSlot, string? materialType, string floorName, int weekNumber, string? slotAugmented = null)
-    {
-        if (materialType != null)
-        {
-            return await _apiClient.CreateMaterialLogEntryAsync(new MaterialLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                MaterialType = materialType,
-                RecipientPlayerId = playerId,
-                Method = "drop",
-                Notes = "Logged via Dalamud plugin",
-                MarkAugmented = slotAugmented != null,
-                SlotAugmented = slotAugmented,
-            });
-        }
-
-        if (gearSlot != null)
-        {
-            return await _apiClient.CreateLootLogEntryAsync(new LootLogCreateRequest
-            {
-                WeekNumber = weekNumber,
-                Floor = floorName,
-                ItemSlot = gearSlot,
-                RecipientPlayerId = playerId,
-                Method = "drop",
-                Notes = "Logged via Dalamud plugin",
-                MarkAcquired = true,
-            });
-        }
-
-        return false;
-    }
-
-    private void OnMarkFloorCleared()
-    {
-        if (_cachedPriority == null) return;
-
-        var floorName = _territoryService.CurrentFloorName ?? "Unknown";
-        var playerIds = _cachedPriority.Players.ConvertAll(p => p.Id);
-
-        Task.Run(async () =>
-        {
-            var weekData = await _apiClient.GetCurrentWeekAsync();
-            var week = weekData?.CurrentWeek ?? 1;
-
-            var success = await _apiClient.MarkFloorClearedAsync(new MarkFloorClearedRequest
-            {
-                WeekNumber = week,
-                Floor = floorName,
-                PlayerIds = playerIds,
-                Notes = "Logged via Dalamud plugin",
-            });
-
-            if (success)
-            {
-                Framework.RunOnFrameworkThread(() => _overlayWindow.MarkFloorCleared());
-                Log.Information($"Marked {floorName} cleared for {playerIds.Count} players");
-            }
+            await _bisData.FetchCurrentPlayerGearAsync(localName);
+            // Surface fetch failures on the Players tab — without this, a 401/network
+            // error from a Players-tab dropdown change is only visible the next time
+            // the user opens the BiS window, with no connection back to what they did.
+            if (!string.IsNullOrEmpty(_bisData.LastError))
+                _configWindow.ShowPlayerLinkStatus($"Linked, but couldn't load BiS gear: {_bisData.LastError}", Theme.Warning);
         });
     }
 
     private void OnRefreshRequested()
     {
-        Task.Run(async () =>
+        _thread.RunBackground(async () =>
         {
             Log.Information("Manual refresh requested");
-            await RefreshPriority();
+            await _raidSession.RefreshPriority();
 
-            if (_cachedPriority != null)
+            var cached = _raidSession.CachedPriority;
+            if (cached != null)
             {
                 // Re-run party matching with fresh data
-                _partyMatching.MatchParty(_cachedPriority.Players);
+                _partyMatching.MatchParty(cached.Players);
                 _overlayWindow.ShowStatus("Priority data refreshed", new System.Numerics.Vector4(0.133f, 0.773f, 0.369f, 1f));
             }
         });
-    }
-
-    /// <summary>Log loot entries for newly acquired BiS items detected during gear sync.</summary>
-    private async Task LogNewAcquisitionsAsync(string playerId, List<string> slots)
-    {
-        try
-        {
-            var weekData = await _apiClient.GetCurrentWeekAsync();
-            var week = weekData?.CurrentWeek ?? 1;
-            var slotToFloor = BuildSlotToFloorMapping();
-            var logged = 0;
-
-            foreach (var slot in slots)
-            {
-                var floor = slotToFloor.GetValueOrDefault(slot,
-                    _territoryService.CurrentFloorName ?? "M9S");
-                var logSuccess = await _apiClient.CreatePurchaseLogEntryAsync(new LootLogCreateRequest
-                {
-                    WeekNumber = week,
-                    Floor = floor,
-                    ItemSlot = slot,
-                    RecipientPlayerId = playerId,
-                    Method = "purchase",
-                    Notes = "Synced via Dalamud plugin",
-                    MarkAcquired = true,
-                });
-                if (logSuccess) logged++;
-            }
-
-            if (logged > 0)
-                ChatGui.Print($"[XRP] Logged {logged} gear acquisition(s).");
-        }
-        catch (System.Exception ex)
-        {
-            Log.Warning($"Failed to log acquisitions: {ex.Message}");
-        }
-    }
-
-    /// <summary>Build a mapping of gear slot → floor name from cached priority data.</summary>
-    private Dictionary<string, string> BuildSlotToFloorMapping()
-    {
-        var mapping = new Dictionary<string, string>();
-        if (_cachedPriority == null) return mapping;
-
-        for (var f = 0; f < _cachedPriority.TierFloors.Count; f++)
-        {
-            var floorKey = $"floor{f + 1}";
-            if (_cachedPriority.Priority.TryGetValue(floorKey, out var floorData))
-            {
-                foreach (var slotKey in floorData.Keys)
-                {
-                    // Use highest floor (later floors override) since BiS drops from later floors
-                    mapping[slotKey] = _cachedPriority.TierFloors[f];
-                }
-            }
-        }
-        return mapping;
-    }
-
-    private async Task RefreshPriority()
-    {
-        if (_territoryService.CurrentFloor == null) return;
-
-        var floor = _territoryService.CurrentFloor.Value;
-        _cachedPriority = await _apiClient.GetPriorityAsync(floor);
-
-        if (_cachedPriority != null)
-        {
-            var floorName = floor <= _cachedPriority.TierFloors.Count
-                ? _cachedPriority.TierFloors[floor - 1]
-                : $"Floor {floor}";
-            _overlayWindow.SetPriorityData(_cachedPriority, floor, floorName, Configuration.DefaultGroupName, Configuration.DefaultTierName);
-        }
     }
 }

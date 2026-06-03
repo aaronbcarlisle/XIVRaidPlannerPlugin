@@ -31,29 +31,32 @@ In-game companion plugin for [FFXIV Raid Planner](https://github.com/aaronbcarli
 
 ### Manual Build
 
-Requires .NET 8 SDK and a Dalamud development environment.
+Requires .NET 10 SDK and a Dalamud development environment.
 
 ```bash
 cd XIVRaidPlannerPlugin
 dotnet build --configuration Release
+dotnet test   # optional — runs 28 unit tests
 ```
 
 The built plugin will be in `XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/`.
 
 ## Setup
 
-1. Generate an API key from the [FFXIV Raid Planner](https://xivraidplanner.app) web app (User Menu > API Keys)
-2. In-game, open settings with `/xrp config`
-3. Paste your API key in the **Connection** tab and click **Test Connection**
-4. Go to the **Static** tab and select your static group (tier defaults to Auto)
-5. Go to the **Players** tab and link your party members to their planner roster entries
+1. In-game, open settings with `/xrp config`
+2. On the **Connection** tab, click **Sign in with browser** — this opens your browser, authenticates via Discord, and mints an API key automatically
+3. Once connected, go to the **Static** tab and select your static group (tier defaults to Auto)
+4. Go to the **Players** tab and link your party members to their planner roster entries
+
+> **Manual key (Advanced):** If browser sign-in isn't available, generate an API key from the [FFXIV Raid Planner](https://xivraidplanner.app) web app (User Menu > API Keys) and paste it in the **Advanced** section of the Connection tab.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/xrp` | Toggle the priority overlay |
+| `/xrp` | Toggle the BiS gear viewer (default) |
 | `/xrp bis` | Toggle the BiS gear viewer |
+| `/xrp priority` | Toggle the priority overlay |
 | `/xrp sync` | Sync equipped gear to the web app |
 | `/xrp config` | Open the configuration window |
 
@@ -80,32 +83,10 @@ Override API and frontend URLs for local development/testing. Hidden behind a "U
 
 ## Requirements
 
-- [FFXIV Raid Planner](https://xivraidplanner.app) account with an API key
+- [FFXIV Raid Planner](https://xivraidplanner.app) account
 - Dalamud ([XIVLauncher](https://goatcorp.github.io/))
 - FFXIV with a static group configured in the web app
 
 ## Project Structure
 
-```
-XIVRaidPlannerPlugin/
-  Plugin.cs                          # Entry point — wires services, events, lifecycle
-  Configuration.cs                   # Persisted settings (Dalamud config)
-  Api/
-    RaidPlannerClient.cs             # HttpClient wrapper with Bearer auth
-    Models.cs                        # C# DTOs (camelCase JSON <-> PascalCase C#)
-  Services/
-    TerritoryService.cs              # Detect savage raid instances (enter/exit events)
-    PartyMatchingService.cs          # Match party members -> planner players
-    LootDetectionService.cs          # Chat message loot parsing
-    LeaveWarningService.cs           # Unclaimed priority loot warning
-    ItemMappingService.cs            # BiS item ID lookup (O(1) dictionary + Lumina)
-    BiSDataService.cs                # Fetch/cache player gear from API
-    InventoryService.cs              # Read equipped gear, classify item sources
-    AddonHighlightService.cs         # BiS highlighting in NeedGreed/shop addons
-  Windows/
-    ConfigWindow.cs                  # 4-tab settings + Advanced tab (ImGui)
-    PriorityOverlayWindow.cs         # Priority overlay during raids
-    BiSViewerWindow.cs               # BiS gear table with progress tracking
-    LootConfirmationWindow.cs        # Confirm before logging a drop
-    LeaveWarningWindow.cs            # "You have unclaimed loot" warning
-```
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full layout, composition root details, event flow, and the browser sign-in sequence.

@@ -1,0 +1,146 @@
+using System;
+using System.Net;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Dalamud.Plugin.Services;
+using XIVRaidPlannerPlugin.Api;
+
+namespace XIVRaidPlannerPlugin.Auth;
+
+/// <summary>One-click browser sign-in: loopback listener + PKCE code exchange → xrp_ key.</summary>
+public sealed class BrowserAuthService
+{
+    private readonly Configuration _config;
+    private readonly RaidPlannerClient _api;
+    private readonly IPluginLog _log;
+
+    public BrowserAuthService(Configuration config, RaidPlannerClient api, IPluginLog log)
+    {
+        _config = config;
+        _api = api;
+        _log = log;
+    }
+
+    /// <summary>Runs the full flow. Returns Ok with the minted key on success; otherwise an ApiError.</summary>
+    public async Task<ApiResult<string>> SignInAsync(CancellationToken ct = default)
+    {
+        var pkce = PkceCodes.Generate();
+        HttpListener? listener = null;
+        string redirect = string.Empty;
+        const int maxAttempts = 3;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            var port = GetFreeLoopbackPort();
+            var candidate = new HttpListener();
+            candidate.Prefixes.Add($"http://127.0.0.1:{port}/callback/");
+            try
+            {
+                candidate.Start();
+                listener = candidate;
+                redirect = $"http://127.0.0.1:{port}/callback/";
+                break;
+            }
+            catch (HttpListenerException ex)
+            {
+                candidate.Close();
+                _log.Warning($"[BrowserAuth] Loopback bind on port {port} failed (attempt {attempt + 1}/{maxAttempts}): {ex.Message}");
+            }
+        }
+        if (listener == null)
+        {
+            _log.Error("[BrowserAuth] Could not bind a loopback port after retries");
+            return ApiResult<string>.Fail(ApiError.Network);
+        }
+        using var _disposeListener = listener;
+
+        var url = $"{_config.EffectiveFrontendBaseUrl.TrimEnd('/')}/plugin-auth" +
+                  $"?redirect_uri={Uri.EscapeDataString(redirect)}" +
+                  $"&state={pkce.State}&code_challenge={pkce.Challenge}&code_challenge_method=S256";
+
+        OpenUrl(url);
+
+        // First budget: 120s for the user to authorize in the browser.
+        using var browserTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        browserTimeout.CancelAfter(TimeSpan.FromSeconds(120));
+
+        HttpListenerContext context;
+        try
+        {
+            context = await listener.GetContextAsync().WaitAsync(browserTimeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return ApiResult<string>.Fail(ApiError.Network);
+        }
+
+        // Local helper: writing the browser status page is best-effort.
+        // If the browser closed before we could respond, don't fail the auth flow.
+        async Task TryWriteResponse(string message)
+        {
+            try { await WriteBrowserResponse(context, message); }
+            catch (Exception ex) { _log.Warning($"[BrowserAuth] Failed to send browser response: {ex.Message}"); }
+        }
+
+        var query = context.Request.QueryString;
+        var code = query["code"];
+        var returnedState = query["state"];
+
+        if (returnedState != pkce.State || string.IsNullOrEmpty(code))
+        {
+            await TryWriteResponse("Sign-in failed: invalid response. You can close this tab.");
+            _log.Error("[BrowserAuth] state mismatch or missing code");
+            return ApiResult<string>.Fail(ApiError.Unauthorized);
+        }
+
+        // Second budget: 30s for the API exchange. RaidPlannerClient also has its own 15s
+        // HttpClient timeout, but the linked CTS lets the caller cancel via `ct` too.
+        using var exchangeTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        exchangeTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var result = await _api.ExchangePluginAuthCodeAsync(code, pkce.Verifier, exchangeTimeout.Token);
+        if (result.IsSuccess)
+        {
+            _config.ApiKey = result.Value!;
+            _config.Save();
+            _api.UpdateAuth();
+            await TryWriteResponse("You're signed in. Return to the game.");
+        }
+        else
+        {
+            await TryWriteResponse("Sign-in failed: the server rejected the request. You can close this tab and try again from the plugin's config window.");
+        }
+
+        return result;
+    }
+
+    private void OpenUrl(string url)
+    {
+        try
+        {
+            Dalamud.Utility.Util.OpenLink(url);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"[BrowserAuth] Dalamud.Utility.Util.OpenLink failed ({ex.Message}); falling back to Process.Start");
+            using var _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+    }
+
+    private static int GetFreeLoopbackPort()
+    {
+        var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        var port = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return port;
+    }
+
+    private static async Task WriteBrowserResponse(HttpListenerContext ctx, string message)
+    {
+        var html = Encoding.UTF8.GetBytes($"<html><body style='font-family:sans-serif'>{message}</body></html>");
+        ctx.Response.ContentType = "text/html";
+        ctx.Response.ContentLength64 = html.Length;
+        await ctx.Response.OutputStream.WriteAsync(html);
+        ctx.Response.Close();
+    }
+}
