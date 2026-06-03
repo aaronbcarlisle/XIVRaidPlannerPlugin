@@ -166,6 +166,7 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnRefresh -= OnRefreshRequested;
         _lootConfirmWindow.OnConfirm -= _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested -= _gearSync.Sync;
+        _partyMatching.OnOverrideChanged -= OnLocalPlayerLinkChanged;
 
         // Dispose services that own addon listeners FIRST
         // This prevents SelectYesno/other addon events from firing handlers that touch windows
