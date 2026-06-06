@@ -8,6 +8,7 @@ In-game companion plugin for [FFXIV Raid Planner](https://github.com/aaronbcarli
 - **BiS Gear Viewer** — In-game BiS gear table with progress tracking, equipped item comparison, and materia details
 - **Auto-Loot Logging** — Detects loot distribution from chat and logs drops to the raid planner API
 - **Gear Sync** — Sync your equipped gear to the web app to update your player card
+- **Mount and Totem Sync** — Sync your extreme difficulty obtained mount / totem to the web app to update your mount / totem farm
 - **Purchase Detection** — Detects BiS tome/book vendor purchases and offers to log them
 - **BiS Highlighting** — Tints BiS items in the Need/Greed loot window and tome vendor shops
 - **Floor Clear Tracking** — One-click "Mark Floor Cleared" for book tracking
