@@ -180,3 +180,50 @@ public class SnapshotPlayerSummary
     [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
     [JsonPropertyName("userId")] public string? UserId { get; set; }
 }
+
+// ==================== Mount Farm Sync ====================
+
+public class MountSyncItem
+{
+    [JsonPropertyName("mountId")] public int MountId { get; set; }
+    [JsonPropertyName("trialId")] public string? TrialId { get; set; }
+    [JsonPropertyName("owned")] public bool Owned { get; set; }
+}
+
+public class TotemSyncItem
+{
+    [JsonPropertyName("itemId")] public int ItemId { get; set; }
+    [JsonPropertyName("trialId")] public string? TrialId { get; set; }
+    [JsonPropertyName("count")] public int Count { get; set; }
+    [JsonPropertyName("totemName")] public string? TotemName { get; set; }
+    [JsonPropertyName("foundIn")] public List<string>? FoundIn { get; set; }
+}
+
+public class PluginMountFarmSyncRequest
+{
+    [JsonPropertyName("characterName")] public string? CharacterName { get; set; }
+    [JsonPropertyName("characterWorld")] public string? CharacterWorld { get; set; }
+    [JsonPropertyName("mounts")] public List<MountSyncItem> Mounts { get; set; } = new();
+    [JsonPropertyName("totems")] public List<TotemSyncItem> Totems { get; set; } = new();
+    [JsonPropertyName("source")] public string Source { get; set; } = "plugin";
+    [JsonPropertyName("pluginVersion")] public string? PluginVersion { get; set; }
+    [JsonPropertyName("syncedAt")] public string? SyncedAt { get; set; }
+}
+
+public class MountFarmCatalogEntry
+{
+    [JsonPropertyName("trialId")] public string TrialId { get; set; } = string.Empty;
+    [JsonPropertyName("expansion")] public string Expansion { get; set; } = string.Empty;
+    [JsonPropertyName("dutyName")] public string DutyName { get; set; } = string.Empty;
+    [JsonPropertyName("mountName")] public string MountName { get; set; } = string.Empty;
+    [JsonPropertyName("mountId")] public int? MountId { get; set; }
+    [JsonPropertyName("totemName")] public string? TotemName { get; set; }
+    [JsonPropertyName("totemItemId")] public int? TotemItemId { get; set; }
+    [JsonPropertyName("totemTarget")] public int TotemTarget { get; set; } = 99;
+}
+
+public class MountFarmCatalogResponse
+{
+    [JsonPropertyName("entries")] public List<MountFarmCatalogEntry> Entries { get; set; } = new();
+    [JsonPropertyName("version")] public string Version { get; set; } = string.Empty;
+}

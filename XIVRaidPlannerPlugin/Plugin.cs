@@ -50,6 +50,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly LootLogCoordinator _lootLog;
     private readonly RaidSessionService _raidSession;
     private readonly GearSyncService _gearSync;
+    private readonly MountFarmService _mountFarm;
 
     // Windows
     public readonly WindowSystem WindowSystem = new("XIVRaidPlannerPlugin");
@@ -118,6 +119,9 @@ public sealed class Plugin : IDalamudPlugin
             _apiClient, _inventoryService, _bisData, _thread, ChatGui, PlayerState, Configuration,
             _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log);
 
+        // Mount farm sync service
+        _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
+
         // Initialize leave-warning addon listener now that windows + session state are available
         _leaveWarning.Initialize(
             AddonLifecycle, PlayerState, _partyMatching, _lootDetection,
@@ -136,10 +140,13 @@ public sealed class Plugin : IDalamudPlugin
         // so the BiS window doesn't keep showing the previous player's data.
         _partyMatching.OnOverrideChanged += OnLocalPlayerLinkChanged;
 
+        // Auto-sync mount farms on login if enabled
+        ClientState.Login += OnLogin;
+
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle BiS viewer. '/xrp priority' for priority overlay. '/xrp sync' to sync gear. '/xrp config' for settings.",
+            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all (gear + mounts). '/xrp gearsync' gear only. '/xrp mountsync' mounts only. '/xrp priority' overlay. '/xrp config' settings.",
         });
 
         // Register UI drawing
@@ -161,6 +168,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleBisViewer;
 
+        ClientState.Login -= OnLogin;
         _lootDetection.OnLootObtained -= _lootLog.OnLootObtained;
         _lootDetection.OnItemPurchased -= _lootLog.OnItemPurchased;
         _overlayWindow.OnManualLog -= _lootLog.OnManualLog;
@@ -214,7 +222,19 @@ public sealed class Plugin : IDalamudPlugin
                 ToggleBisViewer();
                 break;
             case "sync":
+                // Run all enabled sync modules
                 _gearSync.Sync();
+                if (Configuration.EnableMountFarmSync)
+                    _mountFarm.Sync();
+                break;
+            case "gearsync":
+            case "gear":
+                _gearSync.Sync();
+                break;
+            case "mountsync":
+            case "mount":
+            case "mounts":
+                _mountFarm.Sync();
                 break;
             default:
                 // Bare /xrp opens BiS — useful in town between pulls.
@@ -293,6 +313,21 @@ public sealed class Plugin : IDalamudPlugin
             {
                 await _bisData.FetchCurrentPlayerGearAsync(localName);
             }
+        });
+    }
+
+    private void OnLogin()
+    {
+        if (!Configuration.AutoSyncMountFarms || !Configuration.EnableMountFarmSync)
+            return;
+        if (string.IsNullOrEmpty(Configuration.ApiKey))
+            return;
+        // Delay to allow game state to fully initialize before reading inventory
+        _thread.RunBackground(async () =>
+        {
+            await System.Threading.Tasks.Task.Delay(5000);
+            Log.Information("[MountFarm] Auto-sync triggered on login");
+            await _mountFarm.AutoSyncAsync();
         });
     }
 

@@ -93,6 +93,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Highlight BiS items in inventory/armoury chest.</summary>
     public bool EnableInventoryHighlighting { get; set; } = true;
 
+    /// <summary>Enable mount farm sync via /xrp mountsync.</summary>
+    public bool EnableMountFarmSync { get; set; } = true;
+
+    /// <summary>Auto-sync mount/totem data when logging in or changing zones (outside instances).</summary>
+    public bool AutoSyncMountFarms { get; set; } = false;
+
     /// <summary>
     /// Manual overrides for matching in-game character names to planner player IDs.
     /// Key = "Firstname Lastname", Value = planner player UUID.

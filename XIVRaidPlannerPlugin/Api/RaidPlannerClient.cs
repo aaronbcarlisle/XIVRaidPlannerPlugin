@@ -341,6 +341,14 @@ public class RaidPlannerClient : IDisposable
         return await PostAsync($"/api/static-groups/{gid}/tiers/{tid}/loot-log", request, ct);
     }
 
+    // ==================== Mount Farm Sync ====================
+
+    public async Task<ApiResult<MountFarmCatalogResponse>> GetMountFarmCatalogAsync(CancellationToken ct = default)
+        => await GetAsync<MountFarmCatalogResponse>("/api/plugin/mount-farms/catalog", ct);
+
+    public async Task<ApiResult<bool>> SyncMountFarmsAsync(PluginMountFarmSyncRequest request, CancellationToken ct = default)
+        => await PostAsync("/api/plugin/mount-farms/sync", request, ct);
+
     // ==================== HTTP Helpers ====================
 
     private async Task<ApiResult<T>> GetAsync<T>(string endpoint, CancellationToken ct = default) where T : class
