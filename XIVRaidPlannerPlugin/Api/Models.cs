@@ -227,3 +227,52 @@ public class MountFarmCatalogResponse
     [JsonPropertyName("entries")] public List<MountFarmCatalogEntry> Entries { get; set; } = new();
     [JsonPropertyName("version")] public string Version { get; set; } = string.Empty;
 }
+
+// ==================== Batch Gearset Sync ====================
+
+public class PluginGearsetSyncGearSlot
+{
+    [JsonPropertyName("slot")] public string Slot { get; set; } = string.Empty;
+    [JsonPropertyName("hasItem")] public bool HasItem { get; set; }
+    [JsonPropertyName("currentSource")] public string CurrentSource { get; set; } = "unknown";
+    [JsonPropertyName("isAugmented")] public bool IsAugmented { get; set; }
+    [JsonPropertyName("itemId")] public int? ItemId { get; set; }
+    [JsonPropertyName("itemName")] public string? ItemName { get; set; }
+    [JsonPropertyName("itemLevel")] public int? ItemLevel { get; set; }
+    [JsonPropertyName("itemIcon")] public string? ItemIcon { get; set; }
+    [JsonPropertyName("materia")] public List<MateriaSlotInfo>? Materia { get; set; }
+}
+
+public class PluginGearsetEntry
+{
+    [JsonPropertyName("gearsetIndex")] public int GearsetIndex { get; set; }
+    [JsonPropertyName("gearsetName")] public string GearsetName { get; set; } = string.Empty;
+    [JsonPropertyName("job")] public string Job { get; set; } = string.Empty;
+    [JsonPropertyName("classJobId")] public int ClassJobId { get; set; }
+    [JsonPropertyName("gear")] public List<PluginGearsetSyncGearSlot> Gear { get; set; } = new();
+}
+
+public class PluginBatchGearsetSyncRequest
+{
+    [JsonPropertyName("characterName")] public string CharacterName { get; set; } = string.Empty;
+    [JsonPropertyName("characterWorld")] public string CharacterWorld { get; set; } = string.Empty;
+    [JsonPropertyName("gearsets")] public List<PluginGearsetEntry> Gearsets { get; set; } = new();
+    [JsonPropertyName("source")] public string Source { get; set; } = "plugin";
+    [JsonPropertyName("pluginVersion")] public string? PluginVersion { get; set; }
+}
+
+public class PluginBatchGearsetSyncResult
+{
+    [JsonPropertyName("characterId")] public string CharacterId { get; set; } = string.Empty;
+    [JsonPropertyName("syncedJobs")] public List<PluginBatchGearsetSyncJobResult> SyncedJobs { get; set; } = new();
+    [JsonPropertyName("totalSynced")] public int TotalSynced { get; set; }
+    [JsonPropertyName("totalUnchanged")] public int TotalUnchanged { get; set; }
+}
+
+public class PluginBatchGearsetSyncJobResult
+{
+    [JsonPropertyName("job")] public string Job { get; set; } = string.Empty;
+    [JsonPropertyName("snapshotId")] public string SnapshotId { get; set; } = string.Empty;
+    [JsonPropertyName("gearChanged")] public bool GearChanged { get; set; }
+    [JsonPropertyName("avgItemLevel")] public int AvgItemLevel { get; set; }
+}

@@ -349,6 +349,65 @@ public class RaidPlannerClient : IDisposable
     public async Task<ApiResult<bool>> SyncMountFarmsAsync(PluginMountFarmSyncRequest request, CancellationToken ct = default)
         => await PostAsync("/api/plugin/mount-farms/sync", request, ct);
 
+    // ==================== Batch Gearset Sync ====================
+
+    public async Task<ApiResult<PluginBatchGearsetSyncResult>> SyncBatchGearsetsAsync(PluginBatchGearsetSyncRequest request, CancellationToken ct = default)
+    {
+        const string endpoint = "/api/plugin/player/batch-gear-sync";
+        var fullUrl = $"{_httpClient.BaseAddress?.ToString().TrimEnd('/')}{endpoint}";
+        _log.Info($"[BatchGearSync] POST {fullUrl} | gearsets={request.Gearsets.Count} char='{request.CharacterName}' world='{request.CharacterWorld}'");
+
+        if (request.Gearsets.Count > 0)
+        {
+            var first = request.Gearsets[0];
+            _log.Info($"[BatchGearSync] first gearset: index={first.GearsetIndex} name='{first.GearsetName}' job={first.Job} slots={first.Gear.Count}");
+        }
+
+        string? serializedJson = null;
+        try
+        {
+            serializedJson = JsonSerializer.Serialize(request, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"[BatchGearSync] Payload serialization failed: {ex.Message}");
+            return ApiResult<PluginBatchGearsetSyncResult>.Fail(ApiError.Unknown);
+        }
+
+        _log.Info($"[BatchGearSync] Payload serialized OK ({serializedJson.Length} bytes)");
+
+        try
+        {
+            using var content = new StringContent(serializedJson, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(endpoint, content, ct);
+            var statusCode = (int)response.StatusCode;
+            var responseBody = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _log.Error($"[BatchGearSync] {statusCode} from {endpoint} | body: {responseBody}");
+                return ApiResult<PluginBatchGearsetSyncResult>.Fail(MapStatus(response.StatusCode));
+            }
+
+            _log.Info($"[BatchGearSync] {statusCode} OK | body: {responseBody}");
+            var value = JsonSerializer.Deserialize<PluginBatchGearsetSyncResult>(responseBody, JsonOptions);
+            return value is null
+                ? ApiResult<PluginBatchGearsetSyncResult>.Fail(ApiError.Unknown)
+                : ApiResult<PluginBatchGearsetSyncResult>.Ok(value);
+        }
+        catch (TaskCanceledException) { return ApiResult<PluginBatchGearsetSyncResult>.Fail(ApiError.Network); }
+        catch (HttpRequestException ex)
+        {
+            _log.Error($"[BatchGearSync] Network error: {ex.Message}");
+            return ApiResult<PluginBatchGearsetSyncResult>.Fail(ApiError.Network);
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"[BatchGearSync] Unexpected error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return ApiResult<PluginBatchGearsetSyncResult>.Fail(ApiError.Unknown);
+        }
+    }
+
     // ==================== HTTP Helpers ====================
 
     private async Task<ApiResult<T>> GetAsync<T>(string endpoint, CancellationToken ct = default) where T : class
