@@ -49,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly AddonHighlightService _addonHighlight;
     private readonly LootLogCoordinator _lootLog;
     private readonly RaidSessionService _raidSession;
+    private readonly GearsetService _gearsetService;
     private readonly GearSyncService _gearSync;
     private readonly MountFarmService _mountFarm;
 
@@ -114,10 +115,13 @@ public sealed class Plugin : IDalamudPlugin
             _overlayWindow,
             _lootConfirmWindow);
 
+        // Construct gearset service (reads saved gearsets from game memory)
+        _gearsetService = new GearsetService(DataManager, _inventoryService, Log);
+
         // Construct gear sync service (depends on loot coordinator for new-acquisition logging)
         _gearSync = new GearSyncService(
             _apiClient, _inventoryService, _bisData, _thread, ChatGui, PlayerState, Configuration,
-            _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log);
+            _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log, _gearsetService);
 
         // Mount farm sync service
         _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
@@ -146,7 +150,7 @@ public sealed class Plugin : IDalamudPlugin
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all (gear + mounts). '/xrp gearsync' gear only. '/xrp mountsync' mounts only. '/xrp priority' overlay. '/xrp config' settings.",
+            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all (saved gearsets + mounts). '/xrp gearsync' gear only. '/xrp mountsync' mounts only. '/xrp priority' overlay. '/xrp config' settings.",
         });
 
         // Register UI drawing
@@ -223,13 +227,13 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "sync":
                 // Run all enabled sync modules
-                _gearSync.Sync();
+                _gearSync.SyncSavedGearsets();
                 if (Configuration.EnableMountFarmSync)
                     _mountFarm.Sync();
                 break;
             case "gearsync":
             case "gear":
-                _gearSync.Sync();
+                _gearSync.SyncSavedGearsets();
                 break;
             case "mountsync":
             case "mount":
