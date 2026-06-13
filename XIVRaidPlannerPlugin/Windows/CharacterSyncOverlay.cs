@@ -36,14 +36,14 @@ public sealed class CharacterSyncOverlay : IDisposable
         if (addon.IsNull || !addon.IsVisible) return;
 
         var pos = addon.Position;
-        // Anchor inside the Character window's portrait area, top-right corner.
-        // Pivot (1, 0) means the set point is the top-right corner of the overlay,
-        // so it extends leftward and downward — staying within the window bounds
-        // and avoiding the GearSetList panel that appears outside to the right.
+        // Anchor inside the Character window, bottom-right corner.
+        // Pivot (1, 1) means the set point is the bottom-right corner of the overlay,
+        // so it extends leftward and upward — sits over the portrait background
+        // without touching the GearSetList panel outside the window.
         ImGui.SetNextWindowPos(
-            new Vector2(pos.X + addon.ScaledWidth - 8, pos.Y + 68),
+            new Vector2(pos.X + addon.ScaledWidth - 8, pos.Y + addon.ScaledHeight - 8),
             ImGuiCond.Always,
-            new Vector2(1f, 0f));
+            new Vector2(1f, 1f));
         ImGui.SetNextWindowSizeConstraints(new Vector2(160, 0), new Vector2(190, float.MaxValue));
 
         ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.08f, 0.08f, 0.12f, 0.93f));
