@@ -8,9 +8,13 @@ using XIVRaidPlannerPlugin.Services;
 namespace XIVRaidPlannerPlugin.Windows;
 
 /// <summary>
-/// Compact FFXIV-native sync tray anchored to the bottom-right of the Character window.
-/// Layout: [ ↻ Sync Job ] [ All ] [ ⋯ ] / status line
-/// Sync Mounts lives in the ⋯ overflow menu — not a primary action on the Character window.
+/// Compact FFXIV-native sync tray for the Character window.
+///
+/// Locked (default): anchors to the bottom-right corner of the Character addon,
+///   auto-sizes, not movable or resizable.
+/// Unlocked: free-floating at a saved screen position, draggable, resizable.
+///   Position is saved to Configuration when the user locks again or closes
+///   the Character window.
 /// </summary>
 public sealed class CharacterSyncOverlay : IDisposable
 {
@@ -32,21 +36,21 @@ public sealed class CharacterSyncOverlay : IDisposable
     private DateTime _fadeStartTime;
     private const float FadeDurationMs = 150f;
 
+    // ── Free-float position tracking ──────────────────────────────────
+    // Updated every frame while unlocked; flushed to config on lock or close.
+    private Vector2 _livePos;
+    private float _liveW;
+
     // ── FFXIV-native palette ───────────────────────────────────────────
-    // Deep charcoal background — close to FFXIV tooltip/panel chrome
     private static readonly Vector4 BgColor       = new(0.06f, 0.06f, 0.09f, 0.90f);
-    // Gold-silver bevel border (matches FFXIV window frame language)
     private static readonly Vector4 BorderColor   = new(0.58f, 0.52f, 0.38f, 0.72f);
-    // Inset button surface — slightly raised from bg
     private static readonly Vector4 BtnNormal     = new(0.14f, 0.14f, 0.19f, 1.00f);
     private static readonly Vector4 BtnHover      = new(0.22f, 0.22f, 0.29f, 1.00f);
-    // Pressed surface goes darker to simulate inset
     private static readonly Vector4 BtnPress      = new(0.07f, 0.07f, 0.11f, 1.00f);
-    // Primary button: teal-tinted dark to signal priority without being loud
     private static readonly Vector4 BtnPrimary    = new(0.08f, 0.20f, 0.28f, 1.00f);
     private static readonly Vector4 BtnPrimaryHov = new(0.12f, 0.28f, 0.38f, 1.00f);
-    // Subdued status text — should not compete with buttons
     private static readonly Vector4 StatusColor   = new(0.50f, 0.50f, 0.56f, 1.00f);
+    private static readonly Vector4 DragBarColor  = new(0.38f, 0.38f, 0.44f, 1.00f);
 
     public CharacterSyncOverlay(
         GearSyncService gearSync,
@@ -60,6 +64,7 @@ public sealed class CharacterSyncOverlay : IDisposable
         _config = config;
         _gameGui = gameGui;
         _openSettings = openSettings;
+        _liveW = _config.SyncTrayW;
         _gearSync.SyncCompleted += OnGearSyncCompleted;
         _mountFarm.SyncCompleted += OnMountSyncCompleted;
     }
@@ -69,12 +74,16 @@ public sealed class CharacterSyncOverlay : IDisposable
         var addon = _gameGui.GetAddonByName("Character", 1);
         var isVisible = !addon.IsNull && addon.IsVisible;
 
-        // Trigger fade-in each time the Character window opens
         if (isVisible && !_wasAddonVisible)
         {
             _fadeStartTime = DateTime.UtcNow;
             _fadeAlpha = 0f;
         }
+
+        // Auto-save position when Character window closes while unlocked
+        if (!isVisible && _wasAddonVisible && !_config.SyncTrayLocked)
+            PersistPosition();
+
         _wasAddonVisible = isVisible;
         if (!isVisible) return;
 
@@ -82,15 +91,33 @@ public sealed class CharacterSyncOverlay : IDisposable
         _fadeAlpha = Math.Min(1f, elapsedMs / FadeDurationMs);
 
         var pos = addon.Position;
-        // Slide 8 px downward at alpha=0, reaching target at alpha=1
         var slideY = (1f - _fadeAlpha) * 8f;
 
-        ImGui.SetNextWindowPos(
-            new Vector2(pos.X + addon.ScaledWidth - 8, pos.Y + addon.ScaledHeight - 8 + slideY),
-            ImGuiCond.Always,
-            new Vector2(1f, 1f));
-        ImGui.SetNextWindowSizeConstraints(new Vector2(180, 0), new Vector2(220, float.MaxValue));
+        // Anchor position (Character window bottom-right)
+        var anchorX = pos.X + addon.ScaledWidth - 8;
+        var anchorY = pos.Y + addon.ScaledHeight - 8 + slideY;
 
+        // ── Window position / size ─────────────────────────────────────
+        if (_config.SyncTrayLocked)
+        {
+            ImGui.SetNextWindowPos(new Vector2(anchorX, anchorY), ImGuiCond.Always, new Vector2(1f, 1f));
+            ImGui.SetNextWindowSizeConstraints(new Vector2(180, 0), new Vector2(220, float.MaxValue));
+        }
+        else
+        {
+            // Free-floating: position on first appear each time the Character window opens.
+            // ImGuiCond.Appearing fires whenever the window transitions from hidden to visible.
+            if (_config.SyncTrayX >= 0)
+                ImGui.SetNextWindowPos(new Vector2(_config.SyncTrayX, _config.SyncTrayY), ImGuiCond.Appearing);
+            else
+                // No saved position yet — start at the anchor so it doesn't jump to 0,0
+                ImGui.SetNextWindowPos(new Vector2(anchorX, anchorY), ImGuiCond.Appearing, new Vector2(1f, 1f));
+
+            ImGui.SetNextWindowSize(new Vector2(_liveW, 0), ImGuiCond.Appearing);
+            ImGui.SetNextWindowSizeConstraints(new Vector2(160, 60), new Vector2(350, 280));
+        }
+
+        // ── Style push ────────────────────────────────────────────────
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, _fadeAlpha);
         ImGui.PushStyleColor(ImGuiCol.WindowBg,       BgColor);
         ImGui.PushStyleColor(ImGuiCol.Border,         BorderColor);
@@ -101,25 +128,36 @@ public sealed class CharacterSyncOverlay : IDisposable
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding,   3f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding,    new Vector2(8f, 6f));
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding,    2f);
-        // FrameBorderSize 0.5 gives the subtle bevel/inset look on each button
         ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize,  0.5f);
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing,      new Vector2(4f, 3f));
 
-        var open = ImGui.Begin(
-            "##XRPCharSync",
-            ImGuiWindowFlags.NoTitleBar      |
-            ImGuiWindowFlags.AlwaysAutoResize|
-            ImGuiWindowFlags.NoScrollbar     |
-            ImGuiWindowFlags.NoMove          |
+        var flags =
+            ImGuiWindowFlags.NoTitleBar         |
+            ImGuiWindowFlags.NoScrollbar        |
             ImGuiWindowFlags.NoFocusOnAppearing |
-            ImGuiWindowFlags.NoNav           |
-            ImGuiWindowFlags.NoSavedSettings);
+            ImGuiWindowFlags.NoNav              |
+            ImGuiWindowFlags.NoSavedSettings;
 
-        if (open) DrawContent();
+        if (_config.SyncTrayLocked)
+            flags |= ImGuiWindowFlags.NoMove | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoResize;
+
+        var open = ImGui.Begin("##XRPCharSync", flags);
+
+        if (open)
+        {
+            // Track live position/size every frame when unlocked (no disk write)
+            if (!_config.SyncTrayLocked)
+            {
+                _livePos = ImGui.GetWindowPos();
+                _liveW   = ImGui.GetWindowSize().X;
+            }
+
+            DrawContent();
+        }
 
         ImGui.End();
-        ImGui.PopStyleVar(7);   // Alpha + 6 style vars
-        ImGui.PopStyleColor(5); // WindowBg + Border + Button + ButtonHovered + ButtonActive
+        ImGui.PopStyleVar(7);
+        ImGui.PopStyleColor(5);
     }
 
     private void DrawContent()
@@ -129,12 +167,25 @@ public sealed class CharacterSyncOverlay : IDisposable
             (DateTime.UtcNow - _stateChangedAt).TotalMilliseconds > 3000)
             _state = TrayState.Idle;
 
+        // ── Drag header (unlocked only) ────────────────────────────────
+        if (!_config.SyncTrayLocked)
+        {
+            ImGui.TextColored(DragBarColor, "XRP Sync");
+            ImGui.SameLine();
+            // Right-align the "Lock" button
+            var lockW = ImGui.CalcTextSize("Lock").X + ImGui.GetStyle().FramePadding.X * 2f;
+            ImGui.SetCursorPosX(ImGui.GetContentRegionMax().X - lockW);
+            if (ImGui.SmallButton("Lock"))
+                DoLock();
+            ImGui.Separator();
+        }
+
         var gearSyncing  = _state is TrayState.SyncingCurrent or TrayState.SyncingAll;
         var mountSyncing = _state == TrayState.SyncingMounts;
 
-        // ── Button row ──────────────────────────────────────────────
+        // ── Button row ────────────────────────────────────────────────
         var avail   = ImGui.GetContentRegionAvail().X;
-        const float overflowW = 26f;   // wide enough for "..."
+        const float overflowW = 26f;
         const float allW      = 38f;
         var   gap   = ImGui.GetStyle().ItemSpacing.X;
         var   jobW  = avail - overflowW - allW - gap * 2f;
@@ -165,16 +216,16 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         ImGui.SameLine();
 
-        // Tertiary: ... overflow — never disabled (settings always accessible)
+        // Overflow: ...
         if (ImGui.Button("...", new Vector2(overflowW, 0)))
             ImGui.OpenPopup("##xrp_overflow");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("More options");
 
-        // ── Overflow popup ───────────────────────────────────────────
+        // ── Overflow popup ────────────────────────────────────────────
         ImGui.PushStyleColor(ImGuiCol.PopupBg, new Vector4(BgColor.X, BgColor.Y, BgColor.Z, 0.97f));
         ImGui.PushStyleColor(ImGuiCol.Border,  BorderColor);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 3f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding,  3f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
         if (ImGui.BeginPopup("##xrp_overflow"))
         {
@@ -188,17 +239,52 @@ public sealed class CharacterSyncOverlay : IDisposable
             if (ImGui.Selectable("Plugin Settings"))
                 _openSettings();
 
+            ImGui.Separator();
+
+            if (_config.SyncTrayLocked)
+            {
+                if (ImGui.Selectable("Unlock Position"))
+                    DoUnlock();
+            }
+            else
+            {
+                if (ImGui.Selectable("Lock Position"))
+                    DoLock();
+            }
+
             ImGui.EndPopup();
         }
         ImGui.PopStyleVar(2);
         ImGui.PopStyleColor(2);
 
-        // ── Status line ──────────────────────────────────────────────
+        // ── Status line ───────────────────────────────────────────────
         ImGui.Spacing();
         var (statusText, statusCol) = BuildStatus();
         ImGui.PushTextWrapPos(ImGui.GetContentRegionAvail().X);
         ImGui.TextColored(statusCol, statusText);
         ImGui.PopTextWrapPos();
+    }
+
+    private void DoLock()
+    {
+        PersistPosition();
+        _config.SyncTrayLocked = true;
+        _config.Save();
+    }
+
+    private void DoUnlock()
+    {
+        _config.SyncTrayLocked = false;
+        // Don't call Save() here — position saves on re-lock or window close
+    }
+
+    // Writes live position to config and flushes to disk.
+    private void PersistPosition()
+    {
+        _config.SyncTrayX = _livePos.X;
+        _config.SyncTrayY = _livePos.Y;
+        _config.SyncTrayW = _liveW;
+        _config.Save();
     }
 
     private void TriggerSyncCurrentJob()
@@ -232,9 +318,9 @@ public sealed class CharacterSyncOverlay : IDisposable
     {
         return _state switch
         {
-            TrayState.SyncingCurrent => ("Syncing current job…", StatusColor),
-            TrayState.SyncingAll     => ("Syncing all gearsets…", StatusColor),
-            TrayState.SyncingMounts  => ("Syncing mounts…", StatusColor),
+            TrayState.SyncingCurrent => ("Syncing current job...", StatusColor),
+            TrayState.SyncingAll     => ("Syncing all gearsets...", StatusColor),
+            TrayState.SyncingMounts  => ("Syncing mounts...", StatusColor),
             TrayState.Success        => (Truncate(_statusDetail, 50), Theme.Success),
             TrayState.Error          => (Truncate(_statusDetail, 50), Theme.Error),
             _                        => BuildIdleStatus(),

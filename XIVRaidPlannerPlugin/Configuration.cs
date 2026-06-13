@@ -108,6 +108,16 @@ public class Configuration : IPluginConfiguration
     /// <summary>Error message from the last gear sync, or empty string if successful.</summary>
     public string LastGearSyncError { get; set; } = string.Empty;
 
+    // ── Sync tray window layout ──────────────────────────────────────────
+    /// <summary>When true the tray anchors to the Character window bottom-right. When false it floats freely.</summary>
+    public bool SyncTrayLocked { get; set; } = true;
+    /// <summary>Saved X position for the free-floating tray. -1 = use Character window anchor on first show.</summary>
+    public float SyncTrayX { get; set; } = -1f;
+    /// <summary>Saved Y position for the free-floating tray.</summary>
+    public float SyncTrayY { get; set; } = -1f;
+    /// <summary>Saved width of the tray when free-floating.</summary>
+    public float SyncTrayW { get; set; } = 190f;
+
     /// <summary>
     /// Manual overrides for matching in-game character names to planner player IDs.
     /// Key = "Firstname Lastname", Value = planner player UUID.

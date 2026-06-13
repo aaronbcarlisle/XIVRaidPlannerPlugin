@@ -94,7 +94,7 @@ public class MountFarmService
                     _thread.RunOnUi(() =>
                     {
                         if (_catalog != null && _catalog.Count > 0)
-                            _chat.Print("[XIV Raid Planner] Catalog loaded. Please run /xrp mountsync again.");
+                            Sync(); // catalog now loaded — retry automatically
                         else
                             _chat.PrintError("[XIV Raid Planner] Could not load mount farm catalog.");
                     });
