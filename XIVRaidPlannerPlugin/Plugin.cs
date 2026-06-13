@@ -128,7 +128,7 @@ public sealed class Plugin : IDalamudPlugin
         // Mount farm sync service
         _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
 
-        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, _mountFarm, Configuration, GameGui);
+        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, _mountFarm, Configuration, GameGui, ToggleConfigUi);
 
         // Initialize leave-warning addon listener now that windows + session state are available
         _leaveWarning.Initialize(
