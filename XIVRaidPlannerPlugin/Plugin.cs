@@ -60,6 +60,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly LootConfirmationWindow _lootConfirmWindow;
     private readonly LeaveWarningWindow _leaveWarningWindow;
     private readonly BiSViewerWindow _bisViewerWindow;
+    private CharacterSyncOverlay? _characterSyncOverlay;
 
     public Plugin()
     {
@@ -123,6 +124,7 @@ public sealed class Plugin : IDalamudPlugin
             _apiClient, _inventoryService, _bisData, _thread, ChatGui, PlayerState, Configuration,
             _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log, _gearsetService);
         _configWindow.SetGearSync(_gearSync);
+        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, Configuration, GameGui);
 
         // Mount farm sync service
         _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
@@ -156,6 +158,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Register UI drawing
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
+        PluginInterface.UiBuilder.Draw += _characterSyncOverlay.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         // Match the bare `/xrp` command — BiS viewer is the more useful default in town.
         PluginInterface.UiBuilder.OpenMainUi += ToggleBisViewer;
@@ -170,6 +173,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         // Unsubscribe events
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
+        PluginInterface.UiBuilder.Draw -= _characterSyncOverlay!.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleBisViewer;
 
@@ -195,7 +199,8 @@ public sealed class Plugin : IDalamudPlugin
         _lootDetection.Dispose();
         _apiClient.Dispose();
 
-        // Dispose windows
+        // Dispose overlays and windows
+        _characterSyncOverlay?.Dispose();
         WindowSystem.RemoveAllWindows();
         _configWindow.Dispose();
         _overlayWindow.Dispose();
