@@ -32,6 +32,9 @@ public class MountFarmService
     private readonly IChatGui _chat;
     private readonly Configuration _config;
 
+    /// <summary>Fired on the UI thread after a manual Sync() completes. Parameters: (isSuccess, userMessage)</summary>
+    public event Action<bool, string>? SyncCompleted;
+
     // Cached catalog from the server (fetched once per session)
     private List<MountFarmCatalogEntry>? _catalog;
 
@@ -125,18 +128,30 @@ public class MountFarmService
                 var result = await _client.SyncMountFarmsAsync(request);
                 if (result.IsSuccess)
                 {
-                    _thread.RunOnUi(() => _chat.Print("[XIV Raid Planner] Mount farm sync complete."));
+                    _thread.RunOnUi(() =>
+                    {
+                        _chat.Print("[XIV Raid Planner] Mount farm sync complete.");
+                        SyncCompleted?.Invoke(true, "Mounts synced.");
+                    });
                 }
                 else
                 {
                     _log.Warning($"[MountFarm] Sync API call failed: {result.Error}");
-                    _thread.RunOnUi(() => _chat.PrintError("[XIV Raid Planner] Mount farm sync failed. Check plugin log."));
+                    _thread.RunOnUi(() =>
+                    {
+                        _chat.PrintError("[XIV Raid Planner] Mount farm sync failed. Check plugin log.");
+                        SyncCompleted?.Invoke(false, "Mount sync failed.");
+                    });
                 }
             }
             catch (Exception ex)
             {
                 _log.Error($"[MountFarm] Sync failed: {ex.Message}");
-                _thread.RunOnUi(() => _chat.PrintError("[XIV Raid Planner] Mount farm sync failed."));
+                _thread.RunOnUi(() =>
+                {
+                    _chat.PrintError("[XIV Raid Planner] Mount farm sync failed.");
+                    SyncCompleted?.Invoke(false, "Mount sync failed.");
+                });
             }
         });
     }

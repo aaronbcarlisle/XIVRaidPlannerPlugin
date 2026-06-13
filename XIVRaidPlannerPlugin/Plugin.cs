@@ -124,10 +124,11 @@ public sealed class Plugin : IDalamudPlugin
             _apiClient, _inventoryService, _bisData, _thread, ChatGui, PlayerState, Configuration,
             _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log, _gearsetService);
         _configWindow.SetGearSync(_gearSync);
-        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, Configuration, GameGui);
 
         // Mount farm sync service
         _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
+
+        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, _mountFarm, Configuration, GameGui);
 
         // Initialize leave-warning addon listener now that windows + session state are available
         _leaveWarning.Initialize(
