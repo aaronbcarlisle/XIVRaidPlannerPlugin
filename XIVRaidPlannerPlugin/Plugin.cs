@@ -122,6 +122,7 @@ public sealed class Plugin : IDalamudPlugin
         _gearSync = new GearSyncService(
             _apiClient, _inventoryService, _bisData, _thread, ChatGui, PlayerState, Configuration,
             _bisViewerWindow, _lootLog, () => _raidSession.GetState(), Log, _gearsetService);
+        _configWindow.SetGearSync(_gearSync);
 
         // Mount farm sync service
         _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
@@ -150,7 +151,7 @@ public sealed class Plugin : IDalamudPlugin
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all (saved gearsets + mounts). '/xrp gearsync' gear only. '/xrp mountsync' mounts only. '/xrp priority' overlay. '/xrp config' settings.",
+            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all. '/xrp syncgear' current job. '/xrp syncgear all' all gearsets. '/xrp syncgear BRD' specific job. '/xrp mountsync' mounts. '/xrp priority' overlay. '/xrp config' settings.",
         });
 
         // Register UI drawing
@@ -235,12 +236,29 @@ public sealed class Plugin : IDalamudPlugin
             case "gear":
                 _gearSync.SyncSavedGearsets();
                 break;
+            case "syncgear":
+            case "syncgear current":
+                // /xrp syncgear  or  /xrp syncgear current  — sync current equipped job
+                _gearSync.SyncProfileGear();
+                break;
+            case "syncgear all":
+                // /xrp syncgear all — sync all saved gearsets
+                _gearSync.SyncSavedGearsets();
+                break;
             case "mountsync":
             case "mount":
             case "mounts":
                 _mountFarm.Sync();
                 break;
             default:
+                // /xrp syncgear BRD — sync specific job's saved gearset
+                if (trimmedArgs.StartsWith("syncgear "))
+                {
+                    var jobArg = trimmedArgs["syncgear ".Length..].Trim().ToUpperInvariant();
+                    _gearSync.SyncJobGearset(jobArg);
+                    break;
+                }
+
                 // Bare /xrp opens BiS — useful in town between pulls.
                 // Priority overlay still auto-opens via ShowOverlayOnEntry/OnDutyComplete/OnLootWindow.
                 ToggleBisViewer();

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
@@ -26,6 +27,7 @@ public class ConfigWindow : Window, IDisposable
     private readonly PluginThread _thread;
     private readonly BrowserAuthService _browserAuth;
     private readonly BiSDataService _bisData;
+    private GearSyncService? _gearSync;
 
     // UI state
     private string _apiKeyInput = "";
@@ -39,6 +41,12 @@ public class ConfigWindow : Window, IDisposable
     private int _selectedGroupIndex = -1;
     private int _selectedAutoLogMode;
     private bool _autoConnectAttempted;
+
+    // Gear sync tab state
+    private bool _isSyncingCurrent;
+    private bool _isSyncingAll;
+    private string _gearSyncResultMessage = "";
+    private Vector4 _gearSyncResultColor = Theme.White;
 
     // Static tab state
     private List<TierInfo>? _tiers;
@@ -76,6 +84,16 @@ public class ConfigWindow : Window, IDisposable
         _frontendUrlInput = _config.FrontendBaseUrl;
         _useCustomUrls = _config.UseCustomUrls;
         _selectedAutoLogMode = (int)_config.AutoLogMode;
+    }
+
+    /// <summary>
+    /// Wire up the GearSyncService after construction (constructed after windows due to dependency order).
+    /// Must be called once before the window is first opened.
+    /// </summary>
+    public void SetGearSync(GearSyncService gearSync)
+    {
+        _gearSync = gearSync;
+        _gearSync.SyncCompleted += OnGearSyncCompleted;
     }
 
     /// <summary>Update the cached static player list (called when priority data is fetched).</summary>
@@ -141,6 +159,12 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.BeginTabItem("Players"))
             {
                 DrawPlayersTab();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Gear Sync"))
+            {
+                DrawGearSyncTab();
                 ImGui.EndTabItem();
             }
 
@@ -959,5 +983,119 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
-    public void Dispose() { }
+    private void OnGearSyncCompleted(bool success, string message)
+    {
+        _isSyncingCurrent = false;
+        _isSyncingAll = false;
+        _gearSyncResultMessage = message;
+        _gearSyncResultColor = success ? Theme.Success : Theme.Error;
+    }
+
+    private void DrawGearSyncTab()
+    {
+        ImGui.TextWrapped("Manually push your gear to the web app after upgrading. Use this any time you don't want to wait for the next automatic sync.");
+        ImGui.Spacing();
+
+        if (_gearSync == null)
+        {
+            ImGui.TextColored(Theme.Warning, "Gear sync not ready. Reopen /xrp config.");
+            return;
+        }
+
+        var anySyncing = _isSyncingCurrent || _isSyncingAll;
+
+        // ── Sync current job ──────────────────────────────────────────────
+        if (anySyncing) ImGui.BeginDisabled();
+        if (ImGui.Button("Sync Current Job##syncCurrent"))
+        {
+            _isSyncingCurrent = true;
+            _gearSyncResultMessage = "";
+            _gearSync.SyncProfileGear();
+        }
+        if (anySyncing) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("Syncs your currently equipped job's gear.");
+
+        ImGui.Spacing();
+
+        // ── Sync all saved gearsets ───────────────────────────────────────
+        if (anySyncing) ImGui.BeginDisabled();
+        if (ImGui.Button("Sync All Saved Gearsets##syncAll"))
+        {
+            _isSyncingAll = true;
+            _gearSyncResultMessage = "";
+            _gearSync.SyncSavedGearsets();
+        }
+        if (anySyncing) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        ImGui.TextDisabled("Syncs all saved gearsets (one per job, highest iLvl wins).");
+
+        ImGui.Spacing();
+        ImGui.Spacing();
+
+        // ── Status display ────────────────────────────────────────────────
+        if (_isSyncingCurrent)
+        {
+            ImGui.TextColored(Theme.Warning, "Syncing current job...");
+        }
+        else if (_isSyncingAll)
+        {
+            ImGui.TextColored(Theme.Warning, "Syncing all saved gearsets...");
+        }
+        else if (!string.IsNullOrEmpty(_gearSyncResultMessage))
+        {
+            ImGui.TextColored(_gearSyncResultColor, _gearSyncResultMessage);
+        }
+
+        // ── Persistent last-sync summary ─────────────────────────────────
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextColored(Theme.Accent, "Last Sync");
+
+        if (string.IsNullOrEmpty(_config.LastGearSyncAt))
+        {
+            ImGui.TextDisabled("Never synced.");
+        }
+        else
+        {
+            var lastSync = FormatSyncAge(_config.LastGearSyncAt);
+            var jobWord = _config.LastGearSyncJobCount == 1 ? "job" : "jobs";
+
+            if (string.IsNullOrEmpty(_config.LastGearSyncError))
+            {
+                ImGui.TextColored(Theme.Success, $"OK  {lastSync}  ({_config.LastGearSyncJobCount} {jobWord} synced)");
+            }
+            else
+            {
+                ImGui.TextColored(Theme.Success, $"Last sync: {lastSync}");
+                ImGui.TextColored(Theme.Error, $"Last error: {_config.LastGearSyncError}");
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+        ImGui.TextColored(Theme.Muted, "Slash commands: /xrp syncgear  |  /xrp syncgear all  |  /xrp syncgear BRD");
+    }
+
+    private static string FormatSyncAge(string isoTimestamp)
+    {
+        if (!DateTime.TryParse(isoTimestamp, null, DateTimeStyles.RoundtripKind, out var dt))
+            return isoTimestamp;
+
+        var age = DateTime.UtcNow - dt;
+        if (age.TotalSeconds < 60) return "just now";
+        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+
+    public void Dispose()
+    {
+        if (_gearSync != null)
+            _gearSync.SyncCompleted -= OnGearSyncCompleted;
+    }
 }

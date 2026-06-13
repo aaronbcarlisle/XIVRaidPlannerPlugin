@@ -99,6 +99,15 @@ public class Configuration : IPluginConfiguration
     /// <summary>Auto-sync mount/totem data when logging in or changing zones (outside instances).</summary>
     public bool AutoSyncMountFarms { get; set; } = false;
 
+    /// <summary>ISO 8601 timestamp of the last gear sync, or empty string if never synced.</summary>
+    public string LastGearSyncAt { get; set; } = string.Empty;
+
+    /// <summary>Number of jobs synced in the last gear sync operation.</summary>
+    public int LastGearSyncJobCount { get; set; } = 0;
+
+    /// <summary>Error message from the last gear sync, or empty string if successful.</summary>
+    public string LastGearSyncError { get; set; } = string.Empty;
+
     /// <summary>
     /// Manual overrides for matching in-game character names to planner player IDs.
     /// Key = "Firstname Lastname", Value = planner player UUID.
