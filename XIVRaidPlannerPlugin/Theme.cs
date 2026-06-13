@@ -15,7 +15,7 @@ public static class Theme
     // Semantic colors
     public static readonly Vector4 Accent = new(0.078f, 0.722f, 0.651f, 1f);  // #14b8a6
     public static readonly Vector4 Success = new(0.133f, 0.773f, 0.369f, 1f);  // #22c55e
-    public static readonly Vector4 Warning = new(1f, 1f, 0f, 1f);              // #ffff00
+    public static readonly Vector4 Warning = new(0.961f, 0.620f, 0.043f, 1f);   // #f59e0b amber
     public static readonly Vector4 Error = new(1f, 0.3f, 0.3f, 1f);         // #ff4d4d
     public static readonly Vector4 Muted = new(0.6f, 0.6f, 0.6f, 1f);       // #999999
     public static readonly Vector4 White = new(1f, 1f, 1f, 1f);             // #ffffff

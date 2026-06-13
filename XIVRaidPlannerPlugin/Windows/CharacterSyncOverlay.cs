@@ -236,6 +236,11 @@ public sealed class CharacterSyncOverlay : IDisposable
 
             ImGui.Separator();
 
+            if (ImGui.Selectable("Refresh Status"))
+                RefreshStatus();
+
+            ImGui.Separator();
+
             if (ImGui.Selectable("Plugin Settings"))
                 _openSettings();
 
@@ -276,6 +281,17 @@ public sealed class CharacterSyncOverlay : IDisposable
     {
         _config.SyncTrayLocked = false;
         // Don't call Save() here — position saves on re-lock or window close
+    }
+
+    // Clears any persisted error and resets to Idle so the tray shows current status.
+    private void RefreshStatus()
+    {
+        if (_state is TrayState.SyncingCurrent or TrayState.SyncingAll or TrayState.SyncingMounts)
+            return;
+        _config.LastGearSyncError = string.Empty;
+        _config.Save();
+        _state = TrayState.Idle;
+        _statusDetail = string.Empty;
     }
 
     // Writes live position to config and flushes to disk.
@@ -321,7 +337,7 @@ public sealed class CharacterSyncOverlay : IDisposable
             TrayState.SyncingCurrent => ("Syncing current job...", StatusColor),
             TrayState.SyncingAll     => ("Syncing all gearsets...", StatusColor),
             TrayState.SyncingMounts  => ("Syncing mounts...", StatusColor),
-            TrayState.Success        => (Truncate(_statusDetail, 50), Theme.Success),
+            TrayState.Success        => ("OK  " + Truncate(_statusDetail, 46), Theme.Success),
             TrayState.Error          => (Truncate(_statusDetail, 50), Theme.Error),
             _                        => BuildIdleStatus(),
         };
@@ -341,7 +357,7 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         var n = _config.LastGearSyncJobCount;
         var jobStr = n > 0 ? $"{n} job{(n == 1 ? "" : "s")}" : "synced";
-        return ($"Connected · {jobStr} · {age}", StatusColor);
+        return ($"Connected · {jobStr} · Synced {age}", StatusColor);
     }
 
     private void OnGearSyncCompleted(bool success, string message)
