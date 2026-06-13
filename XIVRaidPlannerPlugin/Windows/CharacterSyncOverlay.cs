@@ -89,7 +89,7 @@ public sealed class CharacterSyncOverlay : IDisposable
             new Vector2(pos.X + addon.ScaledWidth - 8, pos.Y + addon.ScaledHeight - 8 + slideY),
             ImGuiCond.Always,
             new Vector2(1f, 1f));
-        ImGui.SetNextWindowSizeConstraints(new Vector2(168, 0), new Vector2(208, float.MaxValue));
+        ImGui.SetNextWindowSizeConstraints(new Vector2(180, 0), new Vector2(220, float.MaxValue));
 
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, _fadeAlpha);
         ImGui.PushStyleColor(ImGuiCol.WindowBg,       BgColor);
@@ -134,17 +134,17 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         // ── Button row ──────────────────────────────────────────────
         var avail   = ImGui.GetContentRegionAvail().X;
-        const float overflowW = 22f;
+        const float overflowW = 26f;   // wide enough for "..."
         const float allW      = 38f;
         var   gap   = ImGui.GetStyle().ItemSpacing.X;
         var   jobW  = avail - overflowW - allW - gap * 2f;
 
-        // Primary: ↻ Sync Job
+        // Primary: Sync Job
         if (gearSyncing) ImGui.BeginDisabled();
         ImGui.PushStyleColor(ImGuiCol.Button,        BtnPrimary);
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, BtnPrimaryHov);
         ImGui.PushStyleColor(ImGuiCol.ButtonActive,  BtnPress);
-        var jobLabel = _state == TrayState.SyncingCurrent ? "↻ Syncing…" : "↻ Sync Job";
+        var jobLabel = _state == TrayState.SyncingCurrent ? "Syncing..." : "Sync Job";
         if (ImGui.Button(jobLabel, new Vector2(jobW, 0)))
             TriggerSyncCurrentJob();
         ImGui.PopStyleColor(3);
@@ -156,7 +156,7 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         // Secondary: All
         if (gearSyncing) ImGui.BeginDisabled();
-        var allLabel = _state == TrayState.SyncingAll ? "…" : "All";
+        var allLabel = _state == TrayState.SyncingAll ? "..." : "All";
         if (ImGui.Button(allLabel, new Vector2(allW, 0)))
             TriggerSyncAll();
         if (gearSyncing) ImGui.EndDisabled();
@@ -165,8 +165,8 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         ImGui.SameLine();
 
-        // Tertiary: ⋯ overflow — never disabled (settings always accessible)
-        if (ImGui.Button("⋯", new Vector2(overflowW, 0)))
+        // Tertiary: ... overflow — never disabled (settings always accessible)
+        if (ImGui.Button("...", new Vector2(overflowW, 0)))
             ImGui.OpenPopup("##xrp_overflow");
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("More options");
@@ -179,13 +179,13 @@ public sealed class CharacterSyncOverlay : IDisposable
         if (ImGui.BeginPopup("##xrp_overflow"))
         {
             if (mountSyncing) ImGui.BeginDisabled();
-            if (ImGui.Selectable("↺  Sync Mounts"))
+            if (ImGui.Selectable("Sync Mounts"))
                 TriggerSyncMounts();
             if (mountSyncing) ImGui.EndDisabled();
 
             ImGui.Separator();
 
-            if (ImGui.Selectable("⚙  Plugin Settings"))
+            if (ImGui.Selectable("Plugin Settings"))
                 _openSettings();
 
             ImGui.EndPopup();
@@ -235,8 +235,8 @@ public sealed class CharacterSyncOverlay : IDisposable
             TrayState.SyncingCurrent => ("Syncing current job…", StatusColor),
             TrayState.SyncingAll     => ("Syncing all gearsets…", StatusColor),
             TrayState.SyncingMounts  => ("Syncing mounts…", StatusColor),
-            TrayState.Success        => ("✓  " + Truncate(_statusDetail, 30), Theme.Success),
-            TrayState.Error          => ("✕  " + Truncate(_statusDetail, 30), Theme.Error),
+            TrayState.Success        => (Truncate(_statusDetail, 50), Theme.Success),
+            TrayState.Error          => (Truncate(_statusDetail, 50), Theme.Error),
             _                        => BuildIdleStatus(),
         };
     }
@@ -273,7 +273,7 @@ public sealed class CharacterSyncOverlay : IDisposable
     }
 
     private static string Truncate(string s, int max)
-        => s.Length <= max ? s : s[..max] + "…";
+        => s.Length <= max ? s : s[..max] + "...";
 
     private static string FormatSyncAge(string isoTimestamp)
     {
