@@ -26,6 +26,12 @@ public sealed class GearSyncService
     private readonly GearsetService? _gearsetService;
     private readonly IPluginLog _log;
 
+    /// <summary>
+    /// Fired on the UI thread after any sync completes (success or failure).
+    /// Parameters: (isSuccess, userMessage)
+    /// </summary>
+    public event Action<bool, string>? SyncCompleted;
+
     public GearSyncService(
         RaidPlannerClient api,
         InventoryService inventory,
@@ -52,6 +58,14 @@ public sealed class GearSyncService
         _sessionState = sessionState;
         _gearsetService = gearsetService;
         _log = log;
+    }
+
+    private void RecordSyncResult(int jobCount, string? error)
+    {
+        _config.LastGearSyncAt = DateTime.UtcNow.ToString("o");
+        _config.LastGearSyncJobCount = jobCount;
+        _config.LastGearSyncError = error ?? string.Empty;
+        _config.Save();
     }
 
     // ==================== Pure diff (TDD) ====================
@@ -300,7 +314,12 @@ public sealed class GearSyncService
                 var msg = changedJobs.Count > 0
                     ? $"[XRP] Synced {data.TotalSynced} gearset(s): {string.Join(", ", changedJobs)} updated."
                     : $"[XRP] {data.TotalSynced} gearset(s) checked — all up to date.";
-                _thread.RunOnUi(() => _chat.Print(msg));
+                RecordSyncResult(data.TotalSynced, null);
+                _thread.RunOnUi(() =>
+                {
+                    _chat.Print(msg);
+                    SyncCompleted?.Invoke(true, msg.Replace("[XRP] ", string.Empty));
+                });
             }
             else
             {
@@ -312,7 +331,12 @@ public sealed class GearSyncService
                     ApiError.Unknown => $"[XRP] Gearset sync rejected by server (422). Your character may not be linked, or a payload field is invalid. Check the Dalamud log for details.",
                     _ => "[XRP] Gearset sync failed — network error. Check your API URL and connection.",
                 };
-                _thread.RunOnUi(() => _chat.PrintError(errMsg));
+                RecordSyncResult(0, errMsg.Replace("[XRP] ", string.Empty));
+                _thread.RunOnUi(() =>
+                {
+                    _chat.PrintError(errMsg);
+                    SyncCompleted?.Invoke(false, errMsg.Replace("[XRP] ", string.Empty));
+                });
             }
         });
     }
@@ -411,14 +435,131 @@ public sealed class GearSyncService
                 var msg = changed
                     ? $"[XRP] {jobAbbrev} gear synced to profile."
                     : $"[XRP] {jobAbbrev} gear already up to date.";
-                _thread.RunOnUi(() => _chat.Print(msg));
+                RecordSyncResult(1, null);
+                _thread.RunOnUi(() =>
+                {
+                    _chat.Print(msg);
+                    SyncCompleted?.Invoke(true, msg.Replace("[XRP] ", string.Empty));
+                });
             }
             else
             {
                 var errMsg = result.Error == ApiError.Unauthorized
                     ? "[XRP] API key rejected — re-authorize via /xrp config"
                     : "[XRP] Failed to sync gear. Check connection.";
-                _thread.RunOnUi(() => _chat.PrintError(errMsg));
+                RecordSyncResult(0, errMsg.Replace("[XRP] ", string.Empty));
+                _thread.RunOnUi(() =>
+                {
+                    _chat.PrintError(errMsg);
+                    SyncCompleted?.Invoke(false, errMsg.Replace("[XRP] ", string.Empty));
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// Sync the saved gearset for a specific job abbreviation (e.g. "BRD").
+    /// Used by /xrp syncgear BRD. Falls back to current equipped gear if no saved gearset is found.
+    /// </summary>
+    public void SyncJobGearset(string jobAbbrev)
+    {
+        if (string.IsNullOrEmpty(_config.ApiKey))
+        {
+            _chat.PrintError("[XRP] No API key configured. Use /xrp config.");
+            return;
+        }
+
+        if (_gearsetService == null)
+        {
+            _chat.Print($"[XRP] Gearset sync not available — falling back to current gear sync.");
+            SyncProfileGear();
+            return;
+        }
+
+        // ReadSavedGearsets must run on the framework/main thread — called here from OnCommand.
+        var gearsets = _gearsetService.ReadSavedGearsets();
+        var match = GearsetService.DeduplicateByJob(gearsets)
+            .FirstOrDefault(g => string.Equals(g.Job, jobAbbrev, StringComparison.OrdinalIgnoreCase));
+
+        if (match == null)
+        {
+            _chat.PrintError($"[XRP] No saved gearset found for {jobAbbrev.ToUpperInvariant()}. Ensure you have a gearset saved in-game for that job.");
+            return;
+        }
+
+        if (!_playerState.IsLoaded)
+        {
+            _chat.PrintError("[XRP] Character not fully loaded yet.");
+            return;
+        }
+
+        var charName = _playerState.CharacterName?.ToString();
+        var charWorld = _playerState.HomeWorld.Value.Name.ToString();
+        if (string.IsNullOrEmpty(charName) || string.IsNullOrEmpty(charWorld))
+        {
+            _chat.PrintError("[XRP] Could not determine character name/world.");
+            return;
+        }
+
+        _chat.Print($"[XRP] Syncing {match.Job} saved gearset...");
+
+        _thread.RunBackground(async () =>
+        {
+            var gearSlots = match.Items.Select(item => new PluginGearsetSyncGearSlot
+            {
+                Slot = item.Slot,
+                HasItem = item.HasItem,
+                CurrentSource = item.CurrentSource,
+                IsAugmented = item.IsAugmented,
+                ItemId = item.ItemId,
+                ItemName = item.ItemName,
+                ItemLevel = item.ItemLevel,
+                ItemIcon = item.ItemIcon,
+            }).ToList();
+
+            var request = new PluginBatchGearsetSyncRequest
+            {
+                CharacterName = charName,
+                CharacterWorld = charWorld,
+                Source = "plugin",
+                Gearsets =
+                [
+                    new PluginGearsetEntry
+                    {
+                        GearsetIndex = match.GearsetIndex,
+                        GearsetName = match.GearsetName,
+                        Job = match.Job,
+                        ClassJobId = match.ClassJobId,
+                        Gear = gearSlots,
+                    },
+                ],
+            };
+
+            var result = await _api.SyncBatchGearsetsAsync(request);
+            if (result.IsSuccess)
+            {
+                var changed = result.Value!.SyncedJobs.Any(j => j.GearChanged);
+                var msg = changed
+                    ? $"[XRP] {match.Job} gear synced to profile."
+                    : $"[XRP] {match.Job} gear already up to date.";
+                RecordSyncResult(1, null);
+                _thread.RunOnUi(() =>
+                {
+                    _chat.Print(msg);
+                    SyncCompleted?.Invoke(true, msg.Replace("[XRP] ", string.Empty));
+                });
+            }
+            else
+            {
+                var errMsg = result.Error == ApiError.Unauthorized
+                    ? "[XRP] API key rejected — re-authorize via /xrp config"
+                    : $"[XRP] Failed to sync {match.Job} gear. Check connection.";
+                RecordSyncResult(0, errMsg.Replace("[XRP] ", string.Empty));
+                _thread.RunOnUi(() =>
+                {
+                    _chat.PrintError(errMsg);
+                    SyncCompleted?.Invoke(false, errMsg.Replace("[XRP] ", string.Empty));
+                });
             }
         });
     }
