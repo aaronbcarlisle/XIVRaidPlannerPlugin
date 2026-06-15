@@ -42,15 +42,15 @@ public sealed class CharacterSyncOverlay : IDisposable
     private float _liveW;
 
     // ── FFXIV-native palette ───────────────────────────────────────────
-    private static readonly Vector4 BgColor       = new(0.06f, 0.06f, 0.09f, 0.90f);
-    private static readonly Vector4 BorderColor   = new(0.58f, 0.52f, 0.38f, 0.72f);
-    private static readonly Vector4 BtnNormal     = new(0.14f, 0.14f, 0.19f, 1.00f);
-    private static readonly Vector4 BtnHover      = new(0.22f, 0.22f, 0.29f, 1.00f);
-    private static readonly Vector4 BtnPress      = new(0.07f, 0.07f, 0.11f, 1.00f);
-    private static readonly Vector4 BtnPrimary    = new(0.08f, 0.20f, 0.28f, 1.00f);
+    private static readonly Vector4 BgColor = new(0.06f, 0.06f, 0.09f, 0.90f);
+    private static readonly Vector4 BorderColor = new(0.58f, 0.52f, 0.38f, 0.72f);
+    private static readonly Vector4 BtnNormal = new(0.14f, 0.14f, 0.19f, 1.00f);
+    private static readonly Vector4 BtnHover = new(0.22f, 0.22f, 0.29f, 1.00f);
+    private static readonly Vector4 BtnPress = new(0.07f, 0.07f, 0.11f, 1.00f);
+    private static readonly Vector4 BtnPrimary = new(0.08f, 0.20f, 0.28f, 1.00f);
     private static readonly Vector4 BtnPrimaryHov = new(0.12f, 0.28f, 0.38f, 1.00f);
-    private static readonly Vector4 StatusColor   = new(0.50f, 0.50f, 0.56f, 1.00f);
-    private static readonly Vector4 DragBarColor  = new(0.38f, 0.38f, 0.44f, 1.00f);
+    private static readonly Vector4 StatusColor = new(0.50f, 0.50f, 0.56f, 1.00f);
+    private static readonly Vector4 DragBarColor = new(0.38f, 0.38f, 0.44f, 1.00f);
 
     public CharacterSyncOverlay(
         GearSyncService gearSync,
@@ -119,23 +119,23 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         // ── Style push ────────────────────────────────────────────────
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, _fadeAlpha);
-        ImGui.PushStyleColor(ImGuiCol.WindowBg,       BgColor);
-        ImGui.PushStyleColor(ImGuiCol.Border,         BorderColor);
-        ImGui.PushStyleColor(ImGuiCol.Button,         BtnNormal);
-        ImGui.PushStyleColor(ImGuiCol.ButtonHovered,  BtnHover);
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive,   BtnPress);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, BgColor);
+        ImGui.PushStyleColor(ImGuiCol.Border, BorderColor);
+        ImGui.PushStyleColor(ImGuiCol.Button, BtnNormal);
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, BtnHover);
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, BtnPress);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding,   3f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding,    new Vector2(8f, 6f));
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding,    2f);
-        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize,  0.5f);
-        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing,      new Vector2(4f, 3f));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 3f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8f, 6f));
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 2f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0.5f);
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(4f, 3f));
 
         var flags =
-            ImGuiWindowFlags.NoTitleBar         |
-            ImGuiWindowFlags.NoScrollbar        |
+            ImGuiWindowFlags.NoTitleBar |
+            ImGuiWindowFlags.NoScrollbar |
             ImGuiWindowFlags.NoFocusOnAppearing |
-            ImGuiWindowFlags.NoNav              |
+            ImGuiWindowFlags.NoNav |
             ImGuiWindowFlags.NoSavedSettings;
 
         if (_config.SyncTrayLocked)
@@ -149,7 +149,7 @@ public sealed class CharacterSyncOverlay : IDisposable
             if (!_config.SyncTrayLocked)
             {
                 _livePos = ImGui.GetWindowPos();
-                _liveW   = ImGui.GetWindowSize().X;
+                _liveW = ImGui.GetWindowSize().X;
             }
 
             DrawContent();
@@ -180,21 +180,21 @@ public sealed class CharacterSyncOverlay : IDisposable
             ImGui.Separator();
         }
 
-        var gearSyncing  = _state is TrayState.SyncingCurrent or TrayState.SyncingAll;
+        var gearSyncing = _state is TrayState.SyncingCurrent or TrayState.SyncingAll;
         var mountSyncing = _state == TrayState.SyncingMounts;
 
         // ── Button row ────────────────────────────────────────────────
-        var avail   = ImGui.GetContentRegionAvail().X;
+        var avail = ImGui.GetContentRegionAvail().X;
         const float overflowW = 26f;
-        const float allW      = 38f;
-        var   gap   = ImGui.GetStyle().ItemSpacing.X;
-        var   jobW  = avail - overflowW - allW - gap * 2f;
+        const float allW = 38f;
+        var gap = ImGui.GetStyle().ItemSpacing.X;
+        var jobW = avail - overflowW - allW - gap * 2f;
 
         // Primary: Sync Job
         if (gearSyncing) ImGui.BeginDisabled();
-        ImGui.PushStyleColor(ImGuiCol.Button,        BtnPrimary);
+        ImGui.PushStyleColor(ImGuiCol.Button, BtnPrimary);
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, BtnPrimaryHov);
-        ImGui.PushStyleColor(ImGuiCol.ButtonActive,  BtnPress);
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, BtnPress);
         var jobLabel = _state == TrayState.SyncingCurrent ? "Syncing..." : "Sync Job";
         if (ImGui.Button(jobLabel, new Vector2(jobW, 0)))
             TriggerSyncCurrentJob();
@@ -224,8 +224,8 @@ public sealed class CharacterSyncOverlay : IDisposable
 
         // ── Overflow popup ────────────────────────────────────────────
         ImGui.PushStyleColor(ImGuiCol.PopupBg, new Vector4(BgColor.X, BgColor.Y, BgColor.Z, 0.97f));
-        ImGui.PushStyleColor(ImGuiCol.Border,  BorderColor);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding,  3f);
+        ImGui.PushStyleColor(ImGuiCol.Border, BorderColor);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 3f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1f);
         if (ImGui.BeginPopup("##xrp_overflow"))
         {
@@ -335,11 +335,11 @@ public sealed class CharacterSyncOverlay : IDisposable
         return _state switch
         {
             TrayState.SyncingCurrent => ("Syncing current job...", StatusColor),
-            TrayState.SyncingAll     => ("Syncing all gearsets...", StatusColor),
-            TrayState.SyncingMounts  => ("Syncing mounts...", StatusColor),
-            TrayState.Success        => ("OK  " + Truncate(_statusDetail, 46), Theme.Success),
-            TrayState.Error          => (Truncate(_statusDetail, 50), Theme.Error),
-            _                        => BuildIdleStatus(),
+            TrayState.SyncingAll => ("Syncing all gearsets...", StatusColor),
+            TrayState.SyncingMounts => ("Syncing mounts...", StatusColor),
+            TrayState.Success => ("OK  " + Truncate(_statusDetail, 46), Theme.Success),
+            TrayState.Error => (Truncate(_statusDetail, 50), Theme.Error),
+            _ => BuildIdleStatus(),
         };
     }
 
@@ -383,8 +383,8 @@ public sealed class CharacterSyncOverlay : IDisposable
             return string.Empty;
         var age = DateTime.UtcNow - dt;
         if (age.TotalMinutes < 1) return "just now";
-        if (age.TotalHours  < 1) return $"{(int)age.TotalMinutes}m ago";
-        if (age.TotalDays   < 1) return $"{(int)age.TotalHours}h ago";
+        if (age.TotalHours < 1) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays < 1) return $"{(int)age.TotalHours}h ago";
         return $"{(int)age.TotalDays}d ago";
     }
 
