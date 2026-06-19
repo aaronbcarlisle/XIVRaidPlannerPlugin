@@ -963,6 +963,39 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Separator();
         ImGui.Spacing();
 
+        // Split Clear overlay section
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.TextColored(Theme.Accent, "Split Clear Overlay");
+        ImGui.TextDisabled("Shows your run assignment when split-clear mode is active for your static.");
+        ImGui.Spacing();
+
+        var showSplitClear = _config.ShowSplitClearOverlay;
+        if (ImGui.Checkbox("Show Split Clear Overlay", ref showSplitClear))
+        {
+            _config.ShowSplitClearOverlay = showSplitClear;
+            _config.Save();
+        }
+
+        if (!showSplitClear) ImGui.BeginDisabled();
+        ImGui.Indent(20);
+
+        var splitOnEntry = _config.ShowSplitClearOnEntry;
+        if (ImGui.Checkbox("Show automatically on savage entry", ref splitOnEntry))
+        {
+            _config.ShowSplitClearOnEntry = splitOnEntry;
+            _config.Save();
+        }
+
+        ImGui.Unindent(20);
+        if (!showSplitClear) ImGui.EndDisabled();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
         // BiS highlighting section
         ImGui.TextColored(Theme.Accent, "BiS Highlighting");
         ImGui.TextDisabled("Tints BiS items in game UI windows with a teal highlight.");
