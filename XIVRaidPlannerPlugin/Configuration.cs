@@ -93,6 +93,12 @@ public class Configuration : IPluginConfiguration
     /// <summary>Highlight BiS items in inventory/armoury chest.</summary>
     public bool EnableInventoryHighlighting { get; set; } = true;
 
+    /// <summary>Show the split-clear overlay in savage instances when split-clear is active.</summary>
+    public bool ShowSplitClearOverlay { get; set; } = true;
+
+    /// <summary>Show split-clear overlay automatically on savage entry.</summary>
+    public bool ShowSplitClearOnEntry { get; set; } = true;
+
     /// <summary>Enable mount farm sync via /xrp mountsync.</summary>
     public bool EnableMountFarmSync { get; set; } = true;
 

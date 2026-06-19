@@ -36,6 +36,7 @@ public sealed class RaidSessionService : IDisposable
     private readonly BiSViewerWindow _bisViewerWindow;
     private readonly ConfigWindow _configWindow;
     private readonly LeaveWarningWindow _leaveWarningWindow;
+    private readonly SplitClearOverlayWindow _splitClearWindow;
     private readonly IAddonLifecycle _addonLifecycle;
 
     private PriorityResponse? _cachedPriority;
@@ -59,6 +60,7 @@ public sealed class RaidSessionService : IDisposable
         BiSViewerWindow bisViewerWindow,
         ConfigWindow configWindow,
         LeaveWarningWindow leaveWarningWindow,
+        SplitClearOverlayWindow splitClearWindow,
         IAddonLifecycle addonLifecycle)
     {
         _api = api;
@@ -75,6 +77,7 @@ public sealed class RaidSessionService : IDisposable
         _bisViewerWindow = bisViewerWindow;
         _configWindow = configWindow;
         _leaveWarningWindow = leaveWarningWindow;
+        _splitClearWindow = splitClearWindow;
         _addonLifecycle = addonLifecycle;
 
         _territory.OnSavageEntered += OnSavageEntered;
@@ -192,6 +195,16 @@ public sealed class RaidSessionService : IDisposable
                     if (_config.ShowBisViewer)
                         _bisViewerWindow.IsOpen = true;
                 }
+
+                // Fetch split-clear data (fire-and-forget; non-fatal if unavailable)
+                var splitResult = await _api.GetSplitClearAsync(ct: ct);
+                if (!ct.IsCancellationRequested && splitResult.IsSuccess && splitResult.Value!.Enabled)
+                {
+                    var localChar = _playerState.IsLoaded ? _playerState.CharacterName?.ToString() : null;
+                    _splitClearWindow.SetData(splitResult.Value!, localChar, _config.DefaultGroupName);
+                    if (_config.ShowSplitClearOverlay && _config.ShowSplitClearOnEntry && _splitClearWindow.HasData)
+                        _splitClearWindow.IsOpen = true;
+                }
             }
         });
     }
@@ -203,6 +216,8 @@ public sealed class RaidSessionService : IDisposable
 
         _overlayWindow.ClearData();
         _overlayWindow.IsOpen = false;
+        _splitClearWindow.ClearData();
+        _splitClearWindow.IsOpen = false;
         _leaveWarningWindow.IsOpen = false;
         _bisViewerWindow.IsOpen = false;
         _bisData.ClearCache();
@@ -221,6 +236,28 @@ public sealed class RaidSessionService : IDisposable
     }
 
     // ==================== Refresh ====================
+
+    /// <summary>Re-fetch split-clear data and refresh the split-clear overlay.</summary>
+    public async Task RefreshSplitClear()
+    {
+        var result = await _api.GetSplitClearAsync();
+        if (!result.IsSuccess || !result.Value!.Enabled) return;
+        var localChar = _playerState.IsLoaded ? _playerState.CharacterName?.ToString() : null;
+        _splitClearWindow.SetData(result.Value!, localChar, _config.DefaultGroupName);
+    }
+
+    /// <summary>Mark all players in a split run as cleared and update the overlay.</summary>
+    public async Task MarkSplitRunCleared(string run)
+    {
+        var result = await _api.MarkSplitRunClearedAsync(run);
+        _thread.RunOnUi(() =>
+        {
+            if (result.IsSuccess)
+                _splitClearWindow.MarkRunClearedSuccess(run);
+            else
+                _splitClearWindow.MarkRunClearedFailed();
+        });
+    }
 
     /// <summary>Re-fetch priority for the current floor and update the overlay.</summary>
     public async Task RefreshPriority()

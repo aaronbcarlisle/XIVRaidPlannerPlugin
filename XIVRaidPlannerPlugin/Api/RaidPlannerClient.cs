@@ -349,6 +349,27 @@ public class RaidPlannerClient : IDisposable
     public async Task<ApiResult<bool>> SyncMountFarmsAsync(PluginMountFarmSyncRequest request, CancellationToken ct = default)
         => await PostAsync("/api/plugin/mount-farms/sync", request, ct);
 
+    // ==================== Split Clear ====================
+
+    /// <summary>Fetch split-clear plan data (assignments + linked characters) for the configured static.</summary>
+    public async Task<ApiResult<SplitClearDataResponse>> GetSplitClearAsync(string? groupId = null, CancellationToken ct = default)
+    {
+        var gid = groupId ?? _config.DefaultGroupId;
+        if (string.IsNullOrEmpty(gid))
+            return ApiResult<SplitClearDataResponse>.Fail(ApiError.NotFound);
+        return await GetAsync<SplitClearDataResponse>($"/api/static-groups/{gid}/split-clear", ct);
+    }
+
+    /// <summary>Mark all players in a split run as cleared for the current week.</summary>
+    public async Task<ApiResult<bool>> MarkSplitRunClearedAsync(string run, string? groupId = null, CancellationToken ct = default)
+    {
+        var gid = groupId ?? _config.DefaultGroupId;
+        if (string.IsNullOrEmpty(gid))
+            return ApiResult<bool>.Fail(ApiError.NotFound);
+        var request = new MarkSplitRunClearedRequest { Run = run };
+        return await PostAsync($"/api/static-groups/{gid}/split-clear/mark-run-cleared", request, ct);
+    }
+
     // ==================== Batch Gearset Sync ====================
 
     public async Task<ApiResult<PluginBatchGearsetSyncResult>> SyncBatchGearsetsAsync(PluginBatchGearsetSyncRequest request, CancellationToken ct = default)

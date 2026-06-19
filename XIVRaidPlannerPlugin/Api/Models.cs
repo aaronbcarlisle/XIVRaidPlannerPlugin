@@ -276,3 +276,52 @@ public class PluginBatchGearsetSyncJobResult
     [JsonPropertyName("gearChanged")] public bool GearChanged { get; set; }
     [JsonPropertyName("avgItemLevel")] public int AvgItemLevel { get; set; }
 }
+
+// ==================== Split Clear ====================
+
+public class SplitClearCharacter
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+    [JsonPropertyName("server")] public string Server { get; set; } = string.Empty;
+    [JsonPropertyName("dataCenter")] public string? DataCenter { get; set; }
+    [JsonPropertyName("isMain")] public bool IsMain { get; set; }
+    [JsonPropertyName("lastSyncedAt")] public string? LastSyncedAt { get; set; }
+    [JsonPropertyName("syncSource")] public string? SyncSource { get; set; }
+}
+
+public class SplitClearAssignmentDto
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
+    [JsonPropertyName("snapshotPlayerId")] public string SnapshotPlayerId { get; set; } = string.Empty;
+    [JsonPropertyName("runACharacterLinkId")] public string? RunACharacterLinkId { get; set; }
+    [JsonPropertyName("runBCharacterLinkId")] public string? RunBCharacterLinkId { get; set; }
+    [JsonPropertyName("mainCharacterName")] public string? MainCharacterName { get; set; }
+    [JsonPropertyName("mainCharacterWorld")] public string? MainCharacterWorld { get; set; }
+    [JsonPropertyName("altCharacterName")] public string? AltCharacterName { get; set; }
+    [JsonPropertyName("altCharacterWorld")] public string? AltCharacterWorld { get; set; }
+    /// <summary>"main" | "alt" | null — which character slot occupies Run A.</summary>
+    [JsonPropertyName("runACharacter")] public string? RunACharacter { get; set; }
+    /// <summary>"main" | "alt" | null — which character slot occupies Run B.</summary>
+    [JsonPropertyName("runBCharacter")] public string? RunBCharacter { get; set; }
+    [JsonPropertyName("lootTarget")] public string? LootTarget { get; set; }
+    [JsonPropertyName("lootTargetJob")] public string? LootTargetJob { get; set; }
+    [JsonPropertyName("runACleared")] public bool RunACleared { get; set; }
+    [JsonPropertyName("runBCleared")] public bool RunBCleared { get; set; }
+    [JsonPropertyName("notes")] public string? Notes { get; set; }
+    [JsonPropertyName("updatedAt")] public string UpdatedAt { get; set; } = string.Empty;
+}
+
+public class SplitClearDataResponse
+{
+    [JsonPropertyName("enabled")] public bool Enabled { get; set; }
+    [JsonPropertyName("assignments")] public List<SplitClearAssignmentDto> Assignments { get; set; } = new();
+    /// <summary>Linked characters keyed by snapshotPlayerId. Main character first.</summary>
+    [JsonPropertyName("playerCharacters")] public Dictionary<string, List<SplitClearCharacter>> PlayerCharacters { get; set; } = new();
+}
+
+public class MarkSplitRunClearedRequest
+{
+    /// <summary>"A" or "B"</summary>
+    [JsonPropertyName("run")] public string Run { get; set; } = "A";
+}
