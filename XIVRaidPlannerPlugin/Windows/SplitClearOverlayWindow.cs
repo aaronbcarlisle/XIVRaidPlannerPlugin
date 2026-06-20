@@ -217,7 +217,7 @@ public class SplitClearOverlayWindow : Window, IDisposable
 
         // Fall back to legacy text fields
         if (slot == "main") return (a.MainCharacterName, a.MainCharacterWorld);
-        if (slot == "alt")  return (a.AltCharacterName, a.AltCharacterWorld);
+        if (slot == "alt") return (a.AltCharacterName, a.AltCharacterWorld);
 
         return (null, null);
     }
@@ -263,8 +263,8 @@ public class SplitClearOverlayWindow : Window, IDisposable
     private static string FormatLootTarget(string? lootTarget, string? lootTargetJob) => lootTarget switch
     {
         "funnel_main" => "Funnel Main",
-        "funnel_job"  => string.IsNullOrEmpty(lootTargetJob) ? "Funnel Job" : $"Funnel {lootTargetJob}",
-        _             => "Normal",
+        "funnel_job" => string.IsNullOrEmpty(lootTargetJob) ? "Funnel Job" : $"Funnel {lootTargetJob}",
+        _ => "Normal",
     };
 }
 
