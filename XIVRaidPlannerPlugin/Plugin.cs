@@ -53,6 +53,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GearsetService _gearsetService;
     private readonly GearSyncService _gearSync;
     private readonly MountFarmService _mountFarm;
+    private readonly CollectionSyncService _collectionSync;
+    private readonly CatalogIdResolverService _catalogIdResolver;
 
     // Windows
     public readonly WindowSystem WindowSystem = new("XIVRaidPlannerPlugin");
@@ -135,7 +137,13 @@ public sealed class Plugin : IDalamudPlugin
         // Mount farm sync service
         _mountFarm = new MountFarmService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
 
-        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, _mountFarm, Configuration, GameGui, ToggleConfigUi);
+        // Collection sync service
+        _collectionSync = new CollectionSyncService(_apiClient, _thread, PlayerState, ChatGui, Configuration, Log);
+
+        // Catalog ID resolver — dev/admin diagnostic; resolves mount/token names to Lumina row IDs
+        _catalogIdResolver = new CatalogIdResolverService(_apiClient, _thread, DataManager, ChatGui, Log);
+
+        _characterSyncOverlay = new CharacterSyncOverlay(_gearSync, _mountFarm, _collectionSync, Configuration, GameGui, ToggleConfigUi);
 
         // Initialize leave-warning addon listener now that windows + session state are available
         _leaveWarning.Initialize(
@@ -167,7 +175,7 @@ public sealed class Plugin : IDalamudPlugin
         // Register commands
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all. '/xrp syncgear' current job. '/xrp syncgear all' all gearsets. '/xrp syncgear BRD' specific job. '/xrp mountsync' mounts. '/xrp priority' overlay. '/xrp config' settings.",
+            HelpMessage = "Toggle BiS viewer. '/xrp sync' to sync all. '/xrp syncgear' current job. '/xrp syncgear all' all gearsets. '/xrp syncgear BRD' specific job. '/xrp mountsync' mounts. '/xrp priority' overlay. '/xrp config' settings. '/xrp resolve-ids' admin: resolve catalog IDs from Lumina.",
         });
 
         // Register UI drawing
@@ -275,6 +283,10 @@ public sealed class Plugin : IDalamudPlugin
             case "splitclear":
             case "split":
                 _splitClearWindow.Toggle();
+                break;
+            case "resolve-ids":
+            case "resolveids":
+                _catalogIdResolver.ResolveAndReport(postToBackend: true);
                 break;
             default:
                 // /xrp syncgear BRD — sync specific job's saved gearset

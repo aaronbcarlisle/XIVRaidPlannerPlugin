@@ -277,6 +277,44 @@ public class PluginBatchGearsetSyncJobResult
     [JsonPropertyName("avgItemLevel")] public int AvgItemLevel { get; set; }
 }
 
+// ==================== Collection Sync ====================
+
+public class CollectionMountItem
+{
+    [JsonPropertyName("mountId")] public int? MountId { get; set; }
+    [JsonPropertyName("trialId")] public string? TrialId { get; set; }
+    [JsonPropertyName("owned")] public bool Owned { get; set; }
+}
+
+public class CollectionTokenItem
+{
+    [JsonPropertyName("itemId")] public int? ItemId { get; set; }
+    [JsonPropertyName("tokenName")] public string? TokenName { get; set; }
+    [JsonPropertyName("count")] public int Count { get; set; }
+    [JsonPropertyName("foundIn")] public List<string>? FoundIn { get; set; }
+}
+
+public class PluginCollectionSyncRequest
+{
+    [JsonPropertyName("characterName")] public string? CharacterName { get; set; }
+    [JsonPropertyName("characterWorld")] public string? CharacterWorld { get; set; }
+    [JsonPropertyName("pluginVersion")] public string? PluginVersion { get; set; }
+    [JsonPropertyName("mounts")] public List<CollectionMountItem> Mounts { get; set; } = new();
+    [JsonPropertyName("currencies")] public List<CollectionTokenItem> Currencies { get; set; } = new();
+    [JsonPropertyName("syncedAt")] public string? SyncedAt { get; set; }
+}
+
+public class CollectionSyncResult
+{
+    [JsonPropertyName("statesUpdated")] public int StatesUpdated { get; set; }
+    [JsonPropertyName("statesUnchanged")] public int StatesUnchanged { get; set; }
+    [JsonPropertyName("tokenCountsUpdated")] public int TokenCountsUpdated { get; set; }
+    [JsonPropertyName("skippedLocked")] public int SkippedLocked { get; set; }
+    [JsonPropertyName("skippedNoId")] public int SkippedNoId { get; set; }
+    [JsonPropertyName("unknownItems")] public List<string> UnknownItems { get; set; } = new();
+    [JsonPropertyName("syncedAt")] public string SyncedAt { get; set; } = string.Empty;
+}
+
 // ==================== Split Clear ====================
 
 public class SplitClearCharacter

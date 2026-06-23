@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
+using XIVRaidPlannerPlugin.Services;
 
 namespace XIVRaidPlannerPlugin.Api;
 
@@ -349,6 +350,16 @@ public class RaidPlannerClient : IDisposable
     public async Task<ApiResult<bool>> SyncMountFarmsAsync(PluginMountFarmSyncRequest request, CancellationToken ct = default)
         => await PostAsync("/api/plugin/mount-farms/sync", request, ct);
 
+    // ==================== Collection Sync ====================
+
+    public async Task<ApiResult<CollectionSyncResult>> SyncCollectionsAsync(PluginCollectionSyncRequest request, CancellationToken ct = default)
+        => await PostReturnAsync<PluginCollectionSyncRequest, CollectionSyncResult>("/api/plugin/collections/sync", request, ct);
+
+    // ==================== Admin: Catalog ID Import ====================
+
+    public async Task<ApiResult<CatalogIdImportResult>> PostVerifiedIdsAsync(List<CatalogIdResolutionResult> mappings, CancellationToken ct = default)
+        => await PostReturnAsync<List<CatalogIdResolutionResult>, CatalogIdImportResult>("/api/admin/collection-catalog/import-verified-ids", mappings, ct);
+
     // ==================== Split Clear ====================
 
     /// <summary>Fetch split-clear plan data (assignments + linked characters) for the configured static.</summary>
@@ -448,6 +459,27 @@ public class RaidPlannerClient : IDisposable
         catch (TaskCanceledException) { return ApiResult<T>.Fail(ApiError.Network); }
         catch (HttpRequestException) { return ApiResult<T>.Fail(ApiError.Network); }
         catch (Exception ex) { _log.Error($"GET {endpoint}: {ex.Message}"); return ApiResult<T>.Fail(ApiError.Unknown); }
+    }
+
+    private async Task<ApiResult<TResult>> PostReturnAsync<TBody, TResult>(string endpoint, TBody body, CancellationToken ct = default)
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(body, JsonOptions);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(endpoint, content, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _log.Error($"POST {endpoint} -> {(int)response.StatusCode}");
+                return ApiResult<TResult>.Fail(MapStatus(response.StatusCode));
+            }
+            var responseJson = await response.Content.ReadAsStringAsync(ct);
+            var value = JsonSerializer.Deserialize<TResult>(responseJson, JsonOptions);
+            return value is null ? ApiResult<TResult>.Fail(ApiError.Unknown) : ApiResult<TResult>.Ok(value);
+        }
+        catch (TaskCanceledException) { return ApiResult<TResult>.Fail(ApiError.Network); }
+        catch (HttpRequestException) { return ApiResult<TResult>.Fail(ApiError.Network); }
+        catch (Exception ex) { _log.Error($"POST {endpoint}: {ex.Message}"); return ApiResult<TResult>.Fail(ApiError.Unknown); }
     }
 
     private async Task<ApiResult<bool>> PostAsync<T>(string endpoint, T body, CancellationToken ct = default)
