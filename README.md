@@ -5,6 +5,7 @@ In-game companion plugin for [FFXIV Raid Planner](https://github.com/aaronbcarli
 ## Features
 
 - **Priority Overlay** — Loot priority rankings per floor during savage raids with top 3 per drop slot
+- **Split Clear Overlay** — Shows your Run A / Run B assignment, loot target, and teammates when your static has split-clear mode active
 - **BiS Gear Viewer** — In-game BiS gear table with progress tracking, equipped item comparison, and materia details
 - **Auto-Loot Logging** — Detects loot distribution from chat and logs drops to the raid planner API
 - **Gear Sync** — Sync your equipped gear to the web app to update your player card
@@ -58,18 +59,20 @@ The built plugin will be in `XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlug
 | `/xrp` | Toggle the BiS gear viewer (default) |
 | `/xrp bis` | Toggle the BiS gear viewer |
 | `/xrp priority` | Toggle the priority overlay |
-| `/xrp sync` | Sync equipped gear and mount to the web app |
+| `/xrp split` | Toggle the split-clear overlay |
+| `/xrp sync` | Sync equipped gear and mounts to the web app |
+| `/xrp gearsync` | Sync equipped gear only |
+| `/xrp mountsync` | Sync mount and totem farm progress |
 | `/xrp config` | Open the configuration window |
-| `/xrp mountsync` | Reads mounts and totems, reports count in chat, syncs to API
-| ` /xrp gearsync` |  Runs gear-only sync
 
 ## How It Works
 
 1. **Enter a savage instance** — the plugin fetches priority data and BiS gear from the API
 2. **Priority overlay** appears showing who should get each drop slot (configurable timing)
-3. **Loot drops** are detected from chat — the plugin offers to log them (Confirm/Auto/Manual modes)
-4. **BiS viewer** shows your gear progress with equipped vs. BiS comparison
-5. **Gear sync** reads your equipped items and updates your player card on the web app
+3. **Split-clear overlay** appears automatically if your static has split-clear mode enabled, showing your run assignment and loot target
+4. **Loot drops** are detected from chat — the plugin offers to log them (Confirm/Auto/Manual modes)
+5. **BiS viewer** shows your gear progress with equipped vs. BiS comparison
+6. **Gear sync** reads your equipped items and updates your player card on the web app
 
 ## Configuration
 

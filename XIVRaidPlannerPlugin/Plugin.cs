@@ -1,3 +1,4 @@
+using System;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -60,6 +61,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly LootConfirmationWindow _lootConfirmWindow;
     private readonly LeaveWarningWindow _leaveWarningWindow;
     private readonly BiSViewerWindow _bisViewerWindow;
+    private readonly SplitClearOverlayWindow _splitClearWindow;
+    private readonly Action<string> _onMarkRunCleared;
+    private readonly Action _onSplitClearRefresh;
     private CharacterSyncOverlay? _characterSyncOverlay;
 
     public Plugin()
@@ -86,18 +90,21 @@ public sealed class Plugin : IDalamudPlugin
         _lootConfirmWindow = new LootConfirmationWindow();
         _leaveWarningWindow = new LeaveWarningWindow(_leaveWarning, GameGui);
         _bisViewerWindow = new BiSViewerWindow(_bisData, _inventoryService, Configuration, DataManager, TextureProvider);
+        _splitClearWindow = new SplitClearOverlayWindow(Configuration);
 
         WindowSystem.AddWindow(_configWindow);
         WindowSystem.AddWindow(_overlayWindow);
         WindowSystem.AddWindow(_lootConfirmWindow);
         WindowSystem.AddWindow(_leaveWarningWindow);
         WindowSystem.AddWindow(_bisViewerWindow);
+        WindowSystem.AddWindow(_splitClearWindow);
 
         // Construct raid session service (owns priority cache + savage events + DutyComplete/NeedGreed)
         _raidSession = new RaidSessionService(
             _apiClient, _territoryService, _partyMatching, _bisData, _lootDetection, _thread,
             ChatGui, PlayerState, Configuration, Log,
-            _overlayWindow, _bisViewerWindow, _configWindow, _leaveWarningWindow, AddonLifecycle);
+            _overlayWindow, _bisViewerWindow, _configWindow, _leaveWarningWindow,
+            _splitClearWindow, AddonLifecycle);
 
         // Construct loot coordinator (depends on raid session for priority + refresh)
         _lootLog = new LootLogCoordinator(
@@ -135,12 +142,18 @@ public sealed class Plugin : IDalamudPlugin
             AddonLifecycle, PlayerState, _partyMatching, _lootDetection,
             _overlayWindow, _leaveWarningWindow, () => _raidSession.GetState());
 
+        // Cache split-clear event handlers so they can be unsubscribed in Dispose
+        _onMarkRunCleared = run => _thread.RunBackground(() => _raidSession.MarkSplitRunCleared(run));
+        _onSplitClearRefresh = () => _thread.RunBackground(() => _raidSession.RefreshSplitClear());
+
         // Wire up events
         _lootDetection.OnLootObtained += _lootLog.OnLootObtained;
         _lootDetection.OnItemPurchased += _lootLog.OnItemPurchased;
         _overlayWindow.OnManualLog += _lootLog.OnManualLog;
         _overlayWindow.OnMarkFloorCleared += _lootLog.OnMarkFloorCleared;
         _overlayWindow.OnRefresh += OnRefreshRequested;
+        _splitClearWindow.OnMarkRunCleared += _onMarkRunCleared;
+        _splitClearWindow.OnRefresh += _onSplitClearRefresh;
         _lootConfirmWindow.OnConfirm += _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested += _gearSync.Sync;
         _bisViewerWindow.OnRefreshRequested += OnBisRefreshRequested;
@@ -184,6 +197,8 @@ public sealed class Plugin : IDalamudPlugin
         _overlayWindow.OnManualLog -= _lootLog.OnManualLog;
         _overlayWindow.OnMarkFloorCleared -= _lootLog.OnMarkFloorCleared;
         _overlayWindow.OnRefresh -= OnRefreshRequested;
+        _splitClearWindow.OnMarkRunCleared -= _onMarkRunCleared;
+        _splitClearWindow.OnRefresh -= _onSplitClearRefresh;
         _lootConfirmWindow.OnConfirm -= _lootLog.OnLootConfirmed;
         _bisViewerWindow.OnSyncRequested -= _gearSync.Sync;
         _bisViewerWindow.OnRefreshRequested -= OnBisRefreshRequested;
@@ -208,6 +223,7 @@ public sealed class Plugin : IDalamudPlugin
         _lootConfirmWindow.Dispose();
         _leaveWarningWindow.Dispose();
         _bisViewerWindow.Dispose();
+        _splitClearWindow.Dispose();
 
         // Remove commands
         CommandManager.RemoveHandler(CommandName);
@@ -255,6 +271,10 @@ public sealed class Plugin : IDalamudPlugin
             case "mount":
             case "mounts":
                 _mountFarm.Sync();
+                break;
+            case "splitclear":
+            case "split":
+                _splitClearWindow.Toggle();
                 break;
             default:
                 // /xrp syncgear BRD — sync specific job's saved gearset
