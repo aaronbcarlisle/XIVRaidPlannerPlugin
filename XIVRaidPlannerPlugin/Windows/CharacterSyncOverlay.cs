@@ -20,12 +20,13 @@ public sealed class CharacterSyncOverlay : IDisposable
 {
     private readonly GearSyncService _gearSync;
     private readonly MountFarmService _mountFarm;
+    private readonly CollectionSyncService _collectionSync;
     private readonly Configuration _config;
     private readonly IGameGui _gameGui;
     private readonly Action _openSettings;
 
     // ── State machine ──────────────────────────────────────────────────
-    private enum TrayState { Idle, SyncingCurrent, SyncingAll, SyncingMounts, Success, Error }
+    private enum TrayState { Idle, SyncingCurrent, SyncingAll, SyncingMounts, SyncingCollections, Success, Error }
     private TrayState _state = TrayState.Idle;
     private DateTime _stateChangedAt = DateTime.MinValue;
     private string _statusDetail = string.Empty;
@@ -55,18 +56,21 @@ public sealed class CharacterSyncOverlay : IDisposable
     public CharacterSyncOverlay(
         GearSyncService gearSync,
         MountFarmService mountFarm,
+        CollectionSyncService collectionSync,
         Configuration config,
         IGameGui gameGui,
         Action openSettings)
     {
         _gearSync = gearSync;
         _mountFarm = mountFarm;
+        _collectionSync = collectionSync;
         _config = config;
         _gameGui = gameGui;
         _openSettings = openSettings;
         _liveW = _config.SyncTrayW;
         _gearSync.SyncCompleted += OnGearSyncCompleted;
         _mountFarm.SyncCompleted += OnMountSyncCompleted;
+        _collectionSync.SyncCompleted += OnCollectionSyncCompleted;
     }
 
     public void Draw()
@@ -234,6 +238,14 @@ public sealed class CharacterSyncOverlay : IDisposable
                 TriggerSyncMounts();
             if (mountSyncing) ImGui.EndDisabled();
 
+            var collectionSyncing = _state == TrayState.SyncingCollections;
+            if (collectionSyncing || !_config.EnableCollectionSync) ImGui.BeginDisabled();
+            if (ImGui.Selectable("Sync Collections"))
+                TriggerSyncCollections();
+            if (collectionSyncing || !_config.EnableCollectionSync) ImGui.EndDisabled();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Update your collection goal states (mounts, tokens) from game data");
+
             ImGui.Separator();
 
             if (ImGui.Selectable("Refresh Status"))
@@ -286,7 +298,7 @@ public sealed class CharacterSyncOverlay : IDisposable
     // Clears any persisted error and resets to Idle so the tray shows current status.
     private void RefreshStatus()
     {
-        if (_state is TrayState.SyncingCurrent or TrayState.SyncingAll or TrayState.SyncingMounts)
+        if (_state is TrayState.SyncingCurrent or TrayState.SyncingAll or TrayState.SyncingMounts or TrayState.SyncingCollections)
             return;
         _config.LastGearSyncError = string.Empty;
         _config.Save();
@@ -330,6 +342,15 @@ public sealed class CharacterSyncOverlay : IDisposable
         _mountFarm.Sync();
     }
 
+    private void TriggerSyncCollections()
+    {
+        if (_state == TrayState.SyncingCollections) return;
+        _state = TrayState.SyncingCollections;
+        _stateChangedAt = DateTime.UtcNow;
+        _statusDetail = string.Empty;
+        _collectionSync.Sync();
+    }
+
     private (string text, Vector4 color) BuildStatus()
     {
         return _state switch
@@ -337,6 +358,7 @@ public sealed class CharacterSyncOverlay : IDisposable
             TrayState.SyncingCurrent => ("Syncing current job...", StatusColor),
             TrayState.SyncingAll => ("Syncing all gearsets...", StatusColor),
             TrayState.SyncingMounts => ("Syncing mounts...", StatusColor),
+            TrayState.SyncingCollections => ("Syncing collections...", StatusColor),
             TrayState.Success => ("OK  " + Truncate(_statusDetail, 46), Theme.Success),
             TrayState.Error => (Truncate(_statusDetail, 50), Theme.Error),
             _ => BuildIdleStatus(),
@@ -374,6 +396,13 @@ public sealed class CharacterSyncOverlay : IDisposable
         _statusDetail = message;
     }
 
+    private void OnCollectionSyncCompleted(bool success, string message)
+    {
+        _state = success ? TrayState.Success : TrayState.Error;
+        _stateChangedAt = DateTime.UtcNow;
+        _statusDetail = message;
+    }
+
     private static string Truncate(string s, int max)
         => s.Length <= max ? s : s[..max] + "...";
 
@@ -392,5 +421,6 @@ public sealed class CharacterSyncOverlay : IDisposable
     {
         _gearSync.SyncCompleted -= OnGearSyncCompleted;
         _mountFarm.SyncCompleted -= OnMountSyncCompleted;
+        _collectionSync.SyncCompleted -= OnCollectionSyncCompleted;
     }
 }

@@ -105,6 +105,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Auto-sync mount/totem data when logging in or changing zones (outside instances).</summary>
     public bool AutoSyncMountFarms { get; set; } = false;
 
+    /// <summary>Enable collection participant state sync via the Collections &amp; Farms board.</summary>
+    public bool EnableCollectionSync { get; set; } = true;
+
     /// <summary>ISO 8601 timestamp of the last gear sync, or empty string if never synced.</summary>
     public string LastGearSyncAt { get; set; } = string.Empty;
 
