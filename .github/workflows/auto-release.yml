@@ -1,0 +1,66 @@
+name: Auto Release on Version Bump
+
+# When a commit lands on main that changes <Version> in the .csproj, tag it and
+# run the release pipeline automatically. Ordinary merges that don't touch the
+# version are left alone (the paths filter below, plus an existing-tag guard).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.csproj'
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Detect version bump
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.detect.outputs.should_release }}
+      tag: ${{ steps.detect.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Need full history + tags so we can check whether the tag exists.
+          fetch-depth: 0
+
+      - name: Detect version and whether the tag already exists
+        id: detect
+        run: |
+          VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' \
+            XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.csproj | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "Could not parse <Version> from the .csproj; skipping."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="v${VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; nothing to release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version ${VERSION} detected; will tag and release ${TAG}."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: steps.detect.outputs.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.detect.outputs.tag }}"
+          git push origin "${{ steps.detect.outputs.tag }}"
+
+  release:
+    name: Release
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    # Reuse the same build/release pipeline used for manual tag pushes.
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.check.outputs.tag }}
