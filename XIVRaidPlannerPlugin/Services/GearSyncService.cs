@@ -68,6 +68,26 @@ public sealed class GearSyncService
         _config.Save();
     }
 
+    /// <summary>
+    /// Build the user-facing gear-sync error. Prefers the backend's own message
+    /// (FastAPI "detail") so the overlay/chat show exactly why it failed, falling
+    /// back to a categorized message when the server gave no detail.
+    /// </summary>
+    private static string BuildSyncErrorMessage(ApiError error, string? detail)
+    {
+        if (!string.IsNullOrWhiteSpace(detail))
+            return $"[XRP] {detail}";
+
+        return error switch
+        {
+            ApiError.Unauthorized => "[XRP] API key rejected — re-authorize via /xrp config.",
+            ApiError.NotFound => "[XRP] Gear sync failed (404) — check your API URL in /xrp config.",
+            ApiError.Server => "[XRP] Backend error during gear sync (500). Check the server logs.",
+            ApiError.Network => "[XRP] Gear sync failed — network error. Check your API URL and connection.",
+            _ => "[XRP] Gear sync rejected by server. Check the Dalamud log for details.",
+        };
+    }
+
     // ==================== Pure diff (TDD) ====================
 
     /// <summary>
@@ -323,14 +343,7 @@ public sealed class GearSyncService
             }
             else
             {
-                var errMsg = result.Error switch
-                {
-                    ApiError.Unauthorized => "[XRP] API key rejected — re-authorize via /xrp config.",
-                    ApiError.NotFound => $"[XRP] Gearset sync failed (404): character '{charName}' on '{charWorld}' not found, or API URL is wrong. Link your character on the profile page. Check the Dalamud log for details.",
-                    ApiError.Server => "[XRP] Backend error during gearset sync (500). Check the server logs.",
-                    ApiError.Unknown => $"[XRP] Gearset sync rejected by server (422). Your character may not be linked, or a payload field is invalid. Check the Dalamud log for details.",
-                    _ => "[XRP] Gearset sync failed — network error. Check your API URL and connection.",
-                };
+                var errMsg = BuildSyncErrorMessage(result.Error, result.Detail);
                 RecordSyncResult(0, errMsg.Replace("[XRP] ", string.Empty));
                 _thread.RunOnUi(() =>
                 {
@@ -444,9 +457,7 @@ public sealed class GearSyncService
             }
             else
             {
-                var errMsg = result.Error == ApiError.Unauthorized
-                    ? "[XRP] API key rejected — re-authorize via /xrp config"
-                    : "[XRP] Failed to sync gear. Check connection.";
+                var errMsg = BuildSyncErrorMessage(result.Error, result.Detail);
                 RecordSyncResult(0, errMsg.Replace("[XRP] ", string.Empty));
                 _thread.RunOnUi(() =>
                 {
