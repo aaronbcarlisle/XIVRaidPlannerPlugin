@@ -4,8 +4,8 @@ on:
   push:
     tags:
       - 'v*'
-  # Allow the auto-release workflow (or a manual dispatch) to invoke the same
-  # build/release pipeline for an already-pushed tag.
+  # Allow the auto-release workflow to invoke the same build/release pipeline
+  # for an already-pushed tag.
   workflow_call:
     inputs:
       tag:
