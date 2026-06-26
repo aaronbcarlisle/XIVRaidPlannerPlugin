@@ -102,7 +102,7 @@ Keep the `Description` field current with all active `/xrp` commands.
 
 ## How to Release
 
-The release pipeline is fully automated via `.github/workflows/release.yml`. All you need to do:
+The release pipeline is fully automated. Releasing is just **bumping the version on `main`** — `.github/workflows/auto-release.yml` does the tagging for you.
 
 ### Step-by-step
 
@@ -110,13 +110,16 @@ The release pipeline is fully automated via `.github/workflows/release.yml`. All
 2. **Update `Changelog` in `XIVRaidPlannerPlugin.json`** — prepend the new version's notes. The installer shows this.
 3. **Update `Description` in `XIVRaidPlannerPlugin.json`** if new `/xrp` commands were added.
 4. **Commit and merge the PR to main** (or push directly to main for hotfixes).
-5. **Push a tag matching the version:**
-   ```bash
-   git tag v0.4.0
-   git push origin v0.4.0
-   ```
 
-That's it. The `release.yml` workflow then:
+That's it — no manual tagging. When the version-bump commit lands on `main`, `auto-release.yml` detects the new `<Version>`, pushes the `v{version}` tag, and invokes `release.yml`. Ordinary merges that don't change the version are left alone (paths filter on the `.csproj` + an existing-tag guard make it a safe no-op).
+
+**Manual fallback:** if you ever need to (re)release a specific tag without a version-bump commit, push the tag yourself — `release.yml` still triggers on any `v*` tag push:
+```bash
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+In both paths the `release.yml` workflow then:
 - Downloads the latest Dalamud distrib
 - Builds the plugin in Release mode
 - Creates a GitHub Release with `latest.zip` as the artifact
@@ -127,7 +130,7 @@ The Dalamud plugin repo/installer list points at `repo.json` on `main`. Once com
 ### What NOT to do
 
 - Do not manually edit `repo.json` version/download fields — the workflow owns those.
-- Do not tag before merging the version bump — the build reads `<Version>` from the `.csproj` at tag time.
+- Do not tag before merging the version bump — `release.yml` checks out the tagged commit and derives the published version from the tag name, so the tag must point at the commit that contains the bumped `<Version>`.
 - Do not use a `v` prefix in the `.csproj` version — just `0.4.0`, not `v0.4.0`. The tag is `v0.4.0`.
 
 ---
