@@ -130,7 +130,7 @@ The Dalamud plugin repo/installer list points at `repo.json` on `main`. Once com
 ### What NOT to do
 
 - Do not manually edit `repo.json` version/download fields — the workflow owns those.
-- Do not tag before merging the version bump — the build reads `<Version>` from the `.csproj` at tag time.
+- Do not tag before merging the version bump — `release.yml` checks out the tagged commit and derives the published version from the tag name, so the tag must point at the commit that contains the bumped `<Version>`.
 - Do not use a `v` prefix in the `.csproj` version — just `0.4.0`, not `v0.4.0`. The tag is `v0.4.0`.
 
 ---

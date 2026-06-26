@@ -29,10 +29,24 @@ jobs:
       - name: Detect version and whether the tag already exists
         id: detect
         run: |
-          VERSION=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' \
-            XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.csproj | head -1)
+          set -o pipefail
+          CSPROJ="XIVRaidPlannerPlugin/XIVRaidPlannerPlugin.csproj"
+          MATCHES=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' "$CSPROJ")
+          COUNT=$(printf '%s\n' "$MATCHES" | grep -c . || true)
+          VERSION=$(printf '%s\n' "$MATCHES" | head -1)
+          if [ "$COUNT" -gt 1 ]; then
+            echo "::error::Found multiple <Version> entries in $CSPROJ; refusing to guess which to release."
+            exit 1
+          fi
           if [ -z "$VERSION" ]; then
-            echo "Could not parse <Version> from the .csproj; skipping."
+            # This push changed the .csproj (paths filter), so a <Version> that's
+            # present but unparseable is a typo, not a deliberate no-op. Fail loudly
+            # rather than silently skip the release the maintainer intended.
+            if grep -q '<Version>' "$CSPROJ"; then
+              echo "::error::<Version> present but could not be parsed (check for typos/whitespace)."
+              exit 1
+            fi
+            echo "No <Version> element found in $CSPROJ; nothing to release."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi

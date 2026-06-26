@@ -60,6 +60,7 @@ jobs:
         with:
           tag_name: ${{ env.TAG }}
           files: XIVRaidPlannerPlugin/bin/Release/XIVRaidPlannerPlugin/latest.zip
+          fail_on_unmatched_files: true
           generate_release_notes: true
 
       - name: Update repo.json
@@ -125,6 +126,14 @@ jobs:
               f.write('\n')
           "
           git add repo.json
+          # Verify the catalog entry actually advertises this release before we
+          # trust an empty diff as "already current" — guards against a silent
+          # no-op (e.g. a manifest-shape change) leaving repo.json stale.
+          ACTUAL=$(python3 -c "import json; print(json.load(open('repo.json'))[0]['AssemblyVersion'])")
+          if [ "$ACTUAL" != "${VERSION}.0" ]; then
+            echo "::error::repo.json AssemblyVersion is $ACTUAL, expected ${VERSION}.0"
+            exit 1
+          fi
           # No-op safely if repo.json is already current for this tag.
           if git diff --cached --quiet; then
             echo "repo.json already up to date for ${TAG}; nothing to commit."
