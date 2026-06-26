@@ -17,11 +17,14 @@ public readonly struct ApiResult<T>
     public T? Value { get; }
     public ApiError Error { get; }
 
-    private ApiResult(bool ok, T? value, ApiError error)
+    /// <summary>Server-provided error message (e.g. FastAPI's "detail"), when available.</summary>
+    public string? Detail { get; }
+
+    private ApiResult(bool ok, T? value, ApiError error, string? detail)
     {
-        IsSuccess = ok; Value = value; Error = error;
+        IsSuccess = ok; Value = value; Error = error; Detail = detail;
     }
 
-    public static ApiResult<T> Ok(T value) => new(true, value, ApiError.None);
-    public static ApiResult<T> Fail(ApiError error) => new(false, default, error);
+    public static ApiResult<T> Ok(T value) => new(true, value, ApiError.None, null);
+    public static ApiResult<T> Fail(ApiError error, string? detail = null) => new(false, default, error, detail);
 }

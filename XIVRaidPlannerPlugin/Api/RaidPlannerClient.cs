@@ -67,6 +67,28 @@ public class RaidPlannerClient : IDisposable
         _ => ApiError.Unknown,
     };
 
+    /// <summary>Pull the human-readable message out of a FastAPI error body (<c>{"detail": "..."}</c>).</summary>
+    private static string? ExtractErrorDetail(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("detail", out var detail) &&
+                detail.ValueKind == JsonValueKind.String)
+            {
+                var text = detail.GetString();
+                return string.IsNullOrWhiteSpace(text) ? null : text;
+            }
+        }
+        catch (JsonException)
+        {
+            // Non-JSON or unexpected shape — fall back to the categorized error.
+        }
+        return null;
+    }
+
     // ==================== Tier Resolution ====================
 
     /// <summary>
@@ -418,7 +440,8 @@ public class RaidPlannerClient : IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 _log.Error($"[BatchGearSync] {statusCode} from {endpoint} | body: {responseBody}");
-                return ApiResult<PluginBatchGearsetSyncResult>.Fail(MapStatus(response.StatusCode));
+                return ApiResult<PluginBatchGearsetSyncResult>.Fail(
+                    MapStatus(response.StatusCode), ExtractErrorDetail(responseBody));
             }
 
             _log.Info($"[BatchGearSync] {statusCode} OK | body: {responseBody}");
